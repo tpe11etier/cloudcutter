@@ -146,7 +146,6 @@ func (app *App) RestorePreviousFocus() {
 	app.SetFocus(previous)
 }
 
-// handleGlobalInput processes global keyboard events
 func (app *App) handleGlobalInput(event *tcell.EventKey) *tcell.EventKey {
 	// Process all input captures in reverse order
 	for i := len(app.inputCaptures) - 1; i >= 0; i-- {

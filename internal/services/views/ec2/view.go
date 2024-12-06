@@ -3,25 +3,23 @@ package ec2
 import (
 	"context"
 	"fmt"
-	"github.com/tpelletiersophos/ahtui/internal/services/aws/ec2"
-	"github.com/tpelletiersophos/ahtui/internal/services/manager"
-	"github.com/tpelletiersophos/ahtui/ui/components"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/ec2"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/manager"
+	"github.com/tpelletiersophos/cloudcutter/ui/components"
 )
 
 type View struct {
-	name           string
-	manager        *manager.Manager
-	ec2Service     *ec2.Service
-	contentFlex    *tview.Flex
-	instanceMap    map[string]*ec2types.Instance
-	LeftPanel      *components.LeftPanel
-	DataTable      *components.DataTable
-	currentContext context.Context
+	name        string
+	manager     *manager.Manager
+	ec2Service  *ec2.Service
+	instanceMap map[string]*ec2types.Instance
+	pages       *tview.Pages
+	leftPanel   *components.LeftPanel
+	dataTable   *components.DataTable
 }
 
 func NewView(manager *manager.Manager, ec2Service *ec2.Service) *View {
@@ -29,97 +27,93 @@ func NewView(manager *manager.Manager, ec2Service *ec2.Service) *View {
 		name:        "ec2",
 		manager:     manager,
 		ec2Service:  ec2Service,
-		contentFlex: tview.NewFlex(),
 		instanceMap: make(map[string]*ec2types.Instance),
+		pages:       tview.NewPages(),
 	}
-
-	view.setupLayout()
+	view.setupLayouts()
 	return view
 }
 
-func (v *View) Name() string {
-	return v.name
+func (v *View) setupLayouts() {
+	mainLayout := v.createMainLayout()
+	v.pages.AddPage("main", mainLayout, true, true)
 }
 
-func (v *View) GetContent() tview.Primitive {
-	return v.contentFlex
-}
+func (v *View) createMainLayout() *tview.Flex {
+	v.leftPanel = components.NewLeftPanel()
+	v.dataTable = components.NewDataTable()
 
-func (v *View) Show() {
-	v.fetchEC2Instances()
-}
+	// Configure the left panel
+	v.leftPanel.SetBorder(true).
+		SetTitle(" EC2 ").
+		SetTitleAlign(tview.AlignCenter).
+		SetTitleColor(tcell.ColorMediumTurquoise)
 
-func (v *View) Hide() {
-	// Implement any necessary cleanup
-}
-
-func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
-	return func(event *tcell.EventKey) *tcell.EventKey {
-		// Handle view-specific key events
-		return event
-	}
-}
-
-func (v *View) setupLayout() {
-	v.DataTable = components.NewDataTable()
-	v.DataTable.SetBorder(true).
+	// Configure the data table
+	v.dataTable.SetBorder(true).
 		SetTitle(" EC2 Instance Details ").
 		SetTitleColor(tcell.ColorTeal)
 
-	v.DataTable.Setup(
+	// Set up the data table with headers
+	v.dataTable.Setup(
 		[]string{"Property", "Value"},
-		[]int{
-			tview.AlignLeft,
-			tview.AlignLeft,
-		},
+		[]int{tview.AlignLeft, tview.AlignLeft},
 	)
 
-	v.LeftPanel = components.NewLeftPanel()
-	v.LeftPanel.SetBorder(true).
-		SetTitle(" EC2 Instances ").
-		SetTitleColor(tcell.ColorTeal)
-
-	v.contentFlex = tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(v.LeftPanel, 40, 0, true).
-		AddItem(v.DataTable, 0, 2, false)
-
-	// Set selection styles
-	v.LeftPanel.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorWhite).
-		Background(tcell.ColorDarkCyan).
-		Attributes(tcell.AttrBold))
-
-	v.DataTable.SetSelectedStyle(tcell.StyleDefault.
-		Foreground(tcell.ColorWhite).
-		Background(tcell.ColorDarkCyan).
-		Attributes(tcell.AttrBold))
-
-	// Set focus and blur functions
-	v.LeftPanel.SetFocusFunc(func() {
-		v.LeftPanel.SetBorderColor(tcell.ColorMediumTurquoise)
-	})
-	v.LeftPanel.SetBlurFunc(func() {
-		v.LeftPanel.SetBorderColor(tcell.ColorGray)
-	})
-
-	v.DataTable.SetFocusFunc(func() {
-		v.DataTable.SetBorderColor(tcell.ColorMediumTurquoise)
-	})
-	v.DataTable.SetBlurFunc(func() {
-		v.DataTable.SetBorderColor(tcell.ColorGray)
-	})
-
-	v.LeftPanel.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+	// Set up the event handler for when the selection changes in the left panel
+	v.leftPanel.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		instance, exists := v.instanceMap[mainText]
 		if !exists || instance == nil {
 			v.manager.UpdateHeader(nil)
-			v.DataTable.Clear()
+			v.dataTable.Clear()
 			return
 		}
 		v.updateEC2Summary(instance)
 		v.updateDataTableForInstance(instance)
 	})
+
+	// Set up component styles (selection, focus)
+	v.setupComponentStyles()
+
+	// Create and return the main layout using a Flex container
+	return tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(v.leftPanel, 40, 0, true).
+		AddItem(v.dataTable, 0, 1, false) // Adjusted proportion to 1 for consistency
+}
+
+func (v *View) setupComponentStyles() {
+	selectedStyle := tcell.StyleDefault.
+		Foreground(tcell.ColorWhite).
+		Background(tcell.ColorDarkCyan).
+		Attributes(tcell.AttrBold)
+
+	v.leftPanel.SetSelectedStyle(selectedStyle)
+	v.dataTable.SetSelectedStyle(selectedStyle)
+
+	v.leftPanel.SetFocusFunc(func() { v.leftPanel.SetBorderColor(tcell.ColorMediumTurquoise) })
+	v.leftPanel.SetBlurFunc(func() { v.leftPanel.SetBorderColor(tcell.ColorGray) })
+	v.dataTable.SetFocusFunc(func() { v.dataTable.SetBorderColor(tcell.ColorMediumTurquoise) })
+	v.dataTable.SetBlurFunc(func() { v.dataTable.SetBorderColor(tcell.ColorGray) })
+}
+
+func (v *View) Name() string                { return v.name }
+func (v *View) GetContent() tview.Primitive { return v.pages }
+func (v *View) Hide()                       {}
+
+func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
+	return func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEsc:
+			v.manager.SetFocus(v.leftPanel)
+			return nil
+		}
+		return event
+	}
+}
+
+func (v *View) Show() {
+	v.fetchEC2Instances()
 }
 
 func (v *View) fetchEC2Instances() {
@@ -132,12 +126,18 @@ func (v *View) fetchEC2Instances() {
 		return
 	}
 
-	v.LeftPanel.Clear()
+	v.leftPanel.Clear()
 	v.instanceMap = make(map[string]*ec2types.Instance)
+
+	if len(instances) == 0 {
+		v.leftPanel.AddItem("No instances found", "", 0, nil)
+		v.manager.UpdateStatusBar("No EC2 instances available")
+		return
+	}
 
 	for _, instance := range instances {
 		displayText := aws.ToString(instance.InstanceId)
-		v.LeftPanel.AddItem(displayText, "", 0, nil)
+		v.leftPanel.AddItem(displayText, "", 0, nil)
 		v.instanceMap[displayText] = instance
 	}
 
@@ -146,14 +146,14 @@ func (v *View) fetchEC2Instances() {
 
 func (v *View) updateDataTableForInstance(instance *ec2types.Instance) {
 	if instance == nil {
-		v.DataTable.Clear()
+		v.dataTable.Clear()
 		return
 	}
 
-	v.DataTable.Clear()
+	v.dataTable.Clear()
 
 	addRow := func(label, value string) {
-		v.DataTable.AddRow([]string{label, value})
+		v.dataTable.AddRow([]string{label, value})
 	}
 
 	addRow("Instance ID", aws.ToString(instance.InstanceId))

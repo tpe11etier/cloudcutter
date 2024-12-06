@@ -6,42 +6,38 @@ import (
 )
 
 type Prompt struct {
-	*tview.Flex
-	InputField *tview.InputField
-	onDone     func(text string)
-	onCancel   func()
+	*tview.InputField
+	onDone   func(text string)
+	onCancel func()
 }
 
-func NewPrompt(label string) *Prompt {
-	p := &Prompt{
-		Flex:       tview.NewFlex(),
-		InputField: tview.NewInputField(),
+func NewPrompt() *Prompt {
+	inputField := tview.NewInputField().
+		SetLabel("❯ ").
+		SetFieldWidth(50).
+		SetLabelColor(tcell.ColorMediumTurquoise).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldTextColor(tcell.ColorWhite).
+		SetPlaceholderTextColor(tcell.ColorDarkGray)
+
+	prompt := &Prompt{
+		InputField: inputField,
 	}
 
-	p.InputField.
-		SetLabel(label).
-		SetLabelColor(tcell.ColorTeal).
-		SetFieldBackgroundColor(tcell.ColorDefault)
-
-	p.AddItem(p.InputField, 0, 1, true)
-
-	p.InputField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
+	inputField.SetDoneFunc(func(key tcell.Key) {
+		switch key {
 		case tcell.KeyEnter:
-			if p.onDone != nil {
-				p.onDone(p.InputField.GetText())
+			if prompt.onDone != nil {
+				prompt.onDone(inputField.GetText())
 			}
-			return nil
 		case tcell.KeyEsc:
-			if p.onCancel != nil {
-				p.onCancel()
+			if prompt.onCancel != nil {
+				prompt.onCancel()
 			}
-			return nil
 		}
-		return event
 	})
 
-	return p
+	return prompt
 }
 
 func (p *Prompt) SetDoneFunc(handler func(text string)) {

@@ -1,4 +1,4 @@
-module github.com/tpelletiersophos/ahtui
+module github.com/tpelletiersophos/cloudcutter
 
 go 1.23.3
 

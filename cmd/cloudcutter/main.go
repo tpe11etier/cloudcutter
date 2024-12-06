@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"github.com/tpelletiersophos/ahtui/internal/services/aws"
-	"github.com/tpelletiersophos/ahtui/internal/services/aws/dynamodb"
-	ec2Service "github.com/tpelletiersophos/ahtui/internal/services/aws/ec2"
-	"github.com/tpelletiersophos/ahtui/internal/services/manager"
-	ddbv "github.com/tpelletiersophos/ahtui/internal/services/views/dynamodb"
-	ec2view "github.com/tpelletiersophos/ahtui/internal/services/views/ec2"
-	"github.com/tpelletiersophos/ahtui/ui"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/aws"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
+	ec2Service "github.com/tpelletiersophos/cloudcutter/internal/services/aws/ec2"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/manager"
+	ddbv "github.com/tpelletiersophos/cloudcutter/internal/services/views/dynamodb"
+	ec2view "github.com/tpelletiersophos/cloudcutter/internal/services/views/ec2"
+	"github.com/tpelletiersophos/cloudcutter/internal/services/views/testview"
+	"github.com/tpelletiersophos/cloudcutter/ui"
 	"log"
 )
 
@@ -31,13 +32,16 @@ func main() {
 	viewManager.RegisterView(dynamoView)
 	viewManager.RegisterView(ec2View)
 
+	testView := testview.NewView(viewManager)
+	viewManager.RegisterView(testView)
+
 	// Set initial view
 	if err := viewManager.SwitchToView("dynamodb"); err != nil {
 		log.Fatalf("Failed to set initial view: %v", err)
 	}
 
 	// Run the application with the app
-	if err := viewManager.Run(app); err != nil {
+	if err := viewManager.Run(); err != nil {
 		log.Fatalf("Application error: %v", err)
 	}
 }
