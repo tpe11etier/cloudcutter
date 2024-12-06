@@ -1,7 +1,6 @@
 package aws
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -9,36 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
-	"os"
-	"path/filepath"
-	"strings"
 )
-
-func ListAWSCredentialsProfiles() ([]string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("unable to determine user home directory: %v", err)
-	}
-	credentialsPath := filepath.Join(homeDir, ".aws", "credentials")
-
-	file, err := os.Open(credentialsPath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open credentials file: %v", err)
-	}
-	defer file.Close()
-
-	var profiles []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			profile := strings.Trim(line, "[]")
-			profiles = append(profiles, profile)
-		}
-	}
-
-	return profiles, nil
-}
 
 func Authenticate(profile, region string) (awssdk.Config, error) {
 	cfg, err := config.LoadDefaultConfig(

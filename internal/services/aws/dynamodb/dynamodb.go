@@ -2,14 +2,14 @@ package dynamodb
 
 import (
 	"context"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type Service struct {
-	Client *awsdynamodb.Client
+	Client    *awsdynamodb.Client
+	awsConfig aws.Config
 }
 
 func NewService(cfg aws.Config) *Service {
