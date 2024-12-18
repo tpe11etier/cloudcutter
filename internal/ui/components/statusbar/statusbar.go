@@ -1,4 +1,4 @@
-package components
+package statusbar
 
 import (
 	"github.com/gdamore/tcell/v2"

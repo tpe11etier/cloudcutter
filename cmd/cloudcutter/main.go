@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	awsservice "github.com/tpelletiersophos/cloudcutter/internal/services/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
 	ec2Service "github.com/tpelletiersophos/cloudcutter/internal/services/aws/ec2"
@@ -11,20 +12,11 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
-	ec2view "github.com/tpelletiersophos/cloudcutter/internal/ui/views/ec2"
 	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views/testview"
 	"log"
 )
 
-type AppServices struct {
-	EC2      *ec2Service.Service
-	DynamoDB *dynamodb.Service
-	Elastic  *elastic.Service
-	Region   string
-}
-
-func initializeServices(cfg aws.Config, region string) (*AppServices, error) {
+func initializeServices(cfg aws.Config, region string) (*services.Services, error) {
 	cfg.Region = region
 
 	// Create all services with the same config
@@ -36,7 +28,7 @@ func initializeServices(cfg aws.Config, region string) (*AppServices, error) {
 		return nil, fmt.Errorf("error creating Elasticsearch service: %v", err)
 	}
 
-	return &AppServices{
+	return &services.Services{
 		EC2:      ec2Svc,
 		DynamoDB: dynamoService,
 		Elastic:  elasticService,
@@ -44,9 +36,9 @@ func initializeServices(cfg aws.Config, region string) (*AppServices, error) {
 	}, nil
 }
 
-func initializeViews(viewManager *manager.Manager, services *AppServices) error {
+func initializeViews(viewManager *manager.Manager, services *services.Services) error {
 	// Initialize views
-	ec2View := ec2view.NewView(viewManager, services.EC2)
+	//ec2View := ec2view.NewView(viewManager, services.EC2)
 	dynamoView := ddbv.NewView(viewManager, services.DynamoDB)
 
 	eView, err := elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
@@ -59,8 +51,8 @@ func initializeViews(viewManager *manager.Manager, services *AppServices) error 
 		viewManager.RegisterView(eView)
 	}
 	viewManager.RegisterView(dynamoView)
-	viewManager.RegisterView(ec2View)
-	viewManager.RegisterView(testview.NewView(viewManager))
+	//viewManager.RegisterView(ec2View)
+	//viewManager.RegisterView(testview.NewView(viewManager))
 
 	return nil
 }

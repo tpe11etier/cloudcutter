@@ -1,4 +1,4 @@
-package components
+package help
 
 import (
 	"fmt"
@@ -10,14 +10,14 @@ const (
 	ModalHelp = "helpModal"
 )
 
-type HelpCommand struct {
+type Command struct {
 	Key         string
 	Description string
 }
 
 type HelpCategory struct {
 	Title    string
-	Commands []HelpCommand
+	Commands []Command
 }
 
 type Help struct {
@@ -35,7 +35,7 @@ func NewHelp() *Help {
 		globalCategories: []HelpCategory{
 			{
 				Title: "General Commands",
-				Commands: []HelpCommand{
+				Commands: []Command{
 					{Key: "Enter", Description: "Execute command"},
 					{Key: "Esc", Description: "Close prompt/Go back"},
 					{Key: "?", Description: "Show help"},
@@ -46,7 +46,7 @@ func NewHelp() *Help {
 			},
 			{
 				Title: "Views",
-				Commands: []HelpCommand{
+				Commands: []Command{
 					{Key: ":dynamodb", Description: "Switch to DynamoDB view"},
 					{Key: ":s3", Description: "Switch to S3 view"},
 					{Key: ":ec2", Description: "Switch to EC2 view"},
@@ -56,7 +56,7 @@ func NewHelp() *Help {
 			},
 			{
 				Title: "AWS",
-				Commands: []HelpCommand{
+				Commands: []Command{
 					{Key: ":region", Description: "Change AWS region"},
 					{Key: ":profile", Description: "Change Opal profile"},
 				},
@@ -167,7 +167,7 @@ func (h *Help) IsVisible() bool {
 	return h.isVisible
 }
 
-func (h *Help) SetCommands(commands []HelpCommand) {
+func (h *Help) SetCommands(commands []Command) {
 	h.contextCategory = &HelpCategory{
 		Title:    "Component Help",
 		Commands: commands,

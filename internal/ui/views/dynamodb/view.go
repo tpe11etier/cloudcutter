@@ -6,6 +6,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
 	"sort"
 	"strings"
 	"sync"
@@ -58,7 +59,7 @@ func (v *View) Name() string {
 	return v.name
 }
 
-func (v *View) GetContent() tview.Primitive {
+func (v *View) Content() tview.Primitive {
 	return v.layout
 }
 
@@ -68,7 +69,7 @@ func (v *View) Show() {
 	} else {
 		v.fetchTables()
 	}
-	v.manager.App.SetFocus(v.leftPanel)
+	v.manager.App().SetFocus(v.leftPanel)
 }
 
 func (v *View) Hide() {}
@@ -114,7 +115,7 @@ func (v *View) updateTableSummary(table *dynamodbtypes.TableDescription) {
 		return
 	}
 
-	summary := []components2.SummaryItem{
+	summary := []types.SummaryItem{
 		{Key: "Table Name", Value: aws.ToString(table.TableName)},
 		{Key: "Status", Value: string(table.TableStatus)},
 		{Key: "Item Count", Value: fmt.Sprintf("%d", aws.ToInt64(table.ItemCount))},
@@ -220,8 +221,8 @@ func (v *View) initializeTableCache() {
 	v.wg.Wait()
 }
 
-func (v *View) GetActiveField() string {
-	currentFocus := v.manager.App.GetFocus()
+func (v *View) ActiveField() string {
+	currentFocus := v.manager.App().GetFocus()
 	switch currentFocus {
 	case v.leftPanel:
 		return "leftPanel"
@@ -233,17 +234,17 @@ func (v *View) GetActiveField() string {
 }
 
 func (v *View) setupLayout() {
-	layoutCfg := manager.LayoutConfig{
+	layoutCfg := types.LayoutConfig{
 		Title:     "DynamoDB",
 		Direction: tview.FlexColumn,
-		Components: []manager.Component{
+		Components: []types.Component{
 			{
 				ID:         "leftPanel",
-				Type:       manager.ComponentList,
+				Type:       types.ComponentList,
 				FixedSize:  30,
 				Proportion: 0,
 				Focus:      true,
-				Style: manager.Style{
+				Style: types.Style{
 					Border:      true,
 					Title:       " DynamoDB ",
 					TitleAlign:  tview.AlignCenter,
@@ -271,9 +272,9 @@ func (v *View) setupLayout() {
 			},
 			{
 				ID:         "dataTable",
-				Type:       manager.ComponentTable,
+				Type:       types.ComponentTable,
 				Proportion: 1,
-				Style: manager.Style{
+				Style: types.Style{
 					Border:      true,
 					BorderColor: tcell.ColorBeige,
 				},
@@ -292,7 +293,7 @@ func (v *View) setupLayout() {
 	}
 
 	v.layout = v.manager.CreateLayout(layoutCfg)
-	//v.manager.Pages.AddPage("dynamodb", layout, true, true)
+	//v.manager.pages.AddPage("dynamodb", layout, true, true)
 
 	v.leftPanel = v.manager.GetPrimitiveByID("leftPanel").(*tview.List)
 	v.dataTable = v.manager.GetPrimitiveByID("dataTable").(*tview.Table)
@@ -371,7 +372,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			v.manager.SetFocus(v.leftPanel)
 			return nil
 		case tcell.KeyTab:
-			currentFocus := v.manager.App.GetFocus()
+			currentFocus := v.manager.App().GetFocus()
 			if currentFocus == v.leftPanel {
 				v.manager.SetFocus(v.dataTable)
 			} else {
@@ -433,7 +434,7 @@ func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Prim
 
 	prompt.Configure(opts)
 	v.manager.ShowFilterPrompt(prompt.Show())
-	v.manager.App.SetFocus(prompt.InputField)
+	v.manager.App().SetFocus(prompt.InputField)
 }
 
 func (v *View) filterItems(filter string) {

@@ -9,7 +9,9 @@ import (
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,25 +65,25 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 
 	//v.components.pages = tview.NewPages()
 	v.setupLayout()
-	manager.App.SetFocus(v.components.filterInput)
+	manager.SetFocus(v.components.filterInput)
 	return v, nil
 }
 
 func (v *View) setupLayout() {
-	cfg := manager.LayoutConfig{
+	cfg := types.LayoutConfig{
 		Direction: tview.FlexRow,
-		Components: []manager.Component{
+		Components: []types.Component{
 			{
 				// Control Panel section
-				Type:      manager.ComponentFlex,
+				Type:      types.ComponentFlex,
 				Direction: tview.FlexRow,
 				FixedSize: 15,
-				Children: []manager.Component{
+				Children: []types.Component{
 					{
 						ID:        "filterInput",
-						Type:      manager.ComponentInputField,
+						Type:      types.ComponentInputField,
 						FixedSize: 3,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 							TitleAlign:  tview.AlignLeft,
@@ -102,9 +104,9 @@ func (v *View) setupLayout() {
 					},
 					{
 						ID:        "localFilterInput",
-						Type:      manager.ComponentInputField,
+						Type:      types.ComponentInputField,
 						FixedSize: 3,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 							TitleAlign:  tview.AlignLeft,
@@ -127,9 +129,9 @@ func (v *View) setupLayout() {
 					},
 					{
 						ID:        "activeFilters",
-						Type:      manager.ComponentTextView,
+						Type:      types.ComponentTextView,
 						FixedSize: 3,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 							Title:       " Active Filters (Delete/Backspace to remove all, or press filter number) ",
@@ -147,15 +149,15 @@ func (v *View) setupLayout() {
 						},
 					},
 					{
-						Type:      manager.ComponentFlex,
+						Type:      types.ComponentFlex,
 						Direction: tview.FlexColumn,
 						FixedSize: 3,
-						Children: []manager.Component{
+						Children: []types.Component{
 							{
 								ID:         "indexView",
-								Type:       manager.ComponentInputField,
+								Type:       types.ComponentInputField,
 								Proportion: 2,
-								Style: manager.Style{
+								Style: types.Style{
 									Border:      true,
 									BorderColor: tcell.ColorBeige,
 									Title:       " Index ",
@@ -179,9 +181,9 @@ func (v *View) setupLayout() {
 							},
 							{
 								ID:         "timeframeInput",
-								Type:       manager.ComponentInputField,
+								Type:       types.ComponentInputField,
 								Proportion: 1,
-								Style: manager.Style{
+								Style: types.Style{
 									Border:      true,
 									BorderColor: tcell.ColorBeige,
 									Title:       " Timeframe ",
@@ -202,7 +204,7 @@ func (v *View) setupLayout() {
 										inputField.SetBorderColor(tcell.ColorBeige)
 									},
 								},
-								Help: []components2.HelpCommand{
+								Help: []help.Command{
 									{Key: "12h", Description: "Last 12 hours"},
 									{Key: "24h", Description: "Last 24 hours"},
 									{Key: "7d", Description: "Last 7 days"},
@@ -214,9 +216,9 @@ func (v *View) setupLayout() {
 					},
 					{
 						ID:        "selectedView",
-						Type:      manager.ComponentTextView,
+						Type:      types.ComponentTextView,
 						FixedSize: 3,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 							Title:       " Selected Fields ",
@@ -237,15 +239,15 @@ func (v *View) setupLayout() {
 				},
 			},
 			{
-				Type:       manager.ComponentFlex,
+				Type:       types.ComponentFlex,
 				Direction:  tview.FlexColumn,
 				Proportion: 1,
-				Children: []manager.Component{
+				Children: []types.Component{
 					{
 						ID:        "fieldList",
-						Type:      manager.ComponentList,
+						Type:      types.ComponentList,
 						FixedSize: 50,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 							Title:       " Available Fields ",
@@ -265,9 +267,9 @@ func (v *View) setupLayout() {
 					},
 					{
 						ID:         "resultsTable",
-						Type:       manager.ComponentTable,
+						Type:       types.ComponentTable,
 						Proportion: 1,
-						Style: manager.Style{
+						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
 						},
@@ -288,7 +290,8 @@ func (v *View) setupLayout() {
 	}
 
 	v.components.content = v.manager.CreateLayout(cfg).(*tview.Flex)
-	v.manager.Pages.AddPage("elastic", v.components.content, true, true)
+	pages := v.manager.Pages()
+	pages.AddPage("elastic", v.components.content, true, true)
 
 	v.components.filterInput = v.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	v.components.activeFilters = v.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
@@ -311,19 +314,19 @@ func (v *View) Name() string {
 	return "elastic"
 }
 
-func (v *View) GetContent() tview.Primitive {
+func (v *View) Content() tview.Primitive {
 	return v.layout
 }
 
 func (v *View) Show() {
 	v.refreshResults()
-	v.manager.App.SetFocus(v.components.filterInput)
+	v.manager.App().SetFocus(v.components.filterInput)
 }
 
 func (v *View) Hide() {}
 
-func (v *View) GetActiveField() string {
-	currentFocus := v.manager.App.GetFocus()
+func (v *View) ActiveField() string {
+	currentFocus := v.manager.App().GetFocus()
 	switch currentFocus {
 	case v.components.filterInput:
 		return "filterInput"
@@ -339,19 +342,19 @@ func (v *View) GetActiveField() string {
 }
 func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	return func(event *tcell.EventKey) *tcell.EventKey {
-		currentFocus := v.manager.App.GetFocus()
+		currentFocus := v.manager.App().GetFocus()
 
 		switch event.Key() {
 		case tcell.KeyTab:
 			return v.handleTabKey(currentFocus)
 		case tcell.KeyRune:
 			if event.Rune() == '~' {
-				v.manager.App.SetFocus(v.components.indexView)
+				v.manager.App().SetFocus(v.components.indexView)
 				v.showIndexSelector()
 				return nil
 			}
 		case tcell.KeyEsc:
-			v.manager.App.SetFocus(v.components.filterInput)
+			v.manager.App().SetFocus(v.components.filterInput)
 			return nil
 		}
 
@@ -375,21 +378,21 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 	switch currentFocus {
 	case v.components.filterInput:
-		v.manager.App.SetFocus(v.components.localFilterInput)
+		v.manager.App().SetFocus(v.components.localFilterInput)
 	case v.components.localFilterInput:
-		v.manager.App.SetFocus(v.components.activeFilters)
+		v.manager.App().SetFocus(v.components.activeFilters)
 	case v.components.activeFilters:
-		v.manager.App.SetFocus(v.components.indexView)
+		v.manager.App().SetFocus(v.components.indexView)
 	case v.components.indexView:
-		v.manager.App.SetFocus(v.components.timeframeInput)
+		v.manager.App().SetFocus(v.components.timeframeInput)
 	case v.components.timeframeInput:
-		v.manager.App.SetFocus(v.components.fieldList)
+		v.manager.App().SetFocus(v.components.fieldList)
 	case v.components.fieldList:
-		v.manager.App.SetFocus(v.components.resultsTable)
+		v.manager.App().SetFocus(v.components.resultsTable)
 	case v.components.resultsTable:
-		v.manager.App.SetFocus(v.components.filterInput)
+		v.manager.App().SetFocus(v.components.filterInput)
 	default:
-		v.manager.App.SetFocus(v.components.filterInput)
+		v.manager.App().SetFocus(v.components.filterInput)
 	}
 	return nil
 }
@@ -555,14 +558,14 @@ func (v *View) showIndexSelector() {
 			v.state.currentIndex = indexName
 			v.components.indexView.SetText(indexName)
 			v.refreshResults()
-			v.manager.App.SetRoot(v.components.content, true)
+			v.manager.App().SetRoot(v.components.content, true)
 		})
 	}
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
-			v.manager.App.SetRoot(v.components.content, true)
-			v.manager.App.SetFocus(v.components.indexView)
+			v.manager.App().SetRoot(v.components.content, true)
+			v.manager.App().SetFocus(v.components.indexView)
 			return nil
 		}
 		return event
@@ -574,8 +577,8 @@ func (v *View) showIndexSelector() {
 		SetBorders(false).
 		AddItem(list, 1, 1, 1, 1, 0, 0, true)
 
-	v.manager.App.SetRoot(modalGrid, true)
-	v.manager.App.SetFocus(list)
+	v.manager.App().SetRoot(modalGrid, true)
+	v.manager.App().SetFocus(list)
 }
 
 func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
@@ -795,7 +798,7 @@ func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Prim
 
 	prompt.Configure(opts)
 	v.manager.ShowFilterPrompt(prompt.Show())
-	v.manager.App.SetFocus(prompt.InputField)
+	v.manager.App().SetFocus(prompt.InputField)
 }
 
 func (v *View) Reinitialize(cfg aws.Config) {

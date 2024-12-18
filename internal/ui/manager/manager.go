@@ -8,10 +8,16 @@ import (
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	components "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/profile"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/region"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 )
 
-// View-related constants
 const (
 	ViewEC2      = "ec2"
 	ViewECR      = "ecr"
@@ -19,16 +25,6 @@ const (
 	ViewElastic  = "elastic"
 	ViewS3       = "s3"
 	ViewTest     = "test"
-)
-
-// Component-related constants
-const (
-	ComponentList       ComponentType = "list"
-	ComponentTextView   ComponentType = "textview"
-	ComponentFlex       ComponentType = "flex"
-	ComponentTable      ComponentType = "table"
-	ComponentInputField ComponentType = "inputfield"
-	ComponentHelp       ComponentType = "help"
 )
 
 // Modal-related constants
@@ -42,74 +38,82 @@ const (
 
 // Manager represents the main view manager
 type Manager struct {
-	App            *ui.App
+	app            *ui.App
 	ctx            context.Context
 	cancelFunc     context.CancelFunc
-	views          map[string]services.View
-	activeView     services.View
-	Pages          *tview.Pages
+	views          map[string]views.View
+	activeView     views.View
+	pages          *tview.Pages
 	layout         *tview.Flex
 	awsConfig      aws.Config
 	primitivesByID map[string]tview.Primitive
 
 	prompt       *components.Prompt
 	filterPrompt *components.Prompt
-	header       *components.Header
-	statusBar    *components.StatusBar
-	help         *components.Help
-
-	profileManager *ProfileManager
+	header       *header.Header
+	statusBar    *statusbar.StatusBar
+	help         *help.Help
 
 	StatusChan         chan string
 	focusedComponentID string
+	profileHandler     *profile.Handler
 }
 
-// NewViewManager creates a new view manager instance
+func (vm *Manager) Pages() *tview.Pages {
+	return vm.pages
+}
+
+func (vm *Manager) App() *tview.Application {
+	return vm.app.Application
+}
+
+func (vm *Manager) ActiveView() tview.Primitive {
+	return vm.activeView.Content()
+}
+
 func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config) *Manager {
 	ctx, cancel := context.WithCancel(ctx)
 	vm := &Manager{
 		ctx:            ctx,
 		cancelFunc:     cancel,
-		App:            app,
-		views:          make(map[string]services.View),
-		Pages:          tview.NewPages(),
-		header:         components.NewHeader(),
-		statusBar:      components.NewStatusBar(),
+		app:            app,
+		views:          make(map[string]views.View),
+		pages:          tview.NewPages(),
+		header:         header.NewHeader(),
+		statusBar:      statusbar.NewStatusBar(),
 		prompt:         components.NewPrompt(),
 		filterPrompt:   components.NewPrompt(),
 		awsConfig:      awsConfig,
 		primitivesByID: make(map[string]tview.Primitive),
-		profileManager: NewProfileManager(),
 		StatusChan:     make(chan string, 10),
-		help:           components.NewHelp(),
+		help:           help.NewHelp(),
 	}
+
+	vm.profileHandler = profile.NewProfileHandler(vm.StatusChan)
 
 	vm.initialize()
 	return vm
 }
 
-// initialize sets up the manager's initial state
 func (vm *Manager) initialize() {
-	vm.profileManager.statusChan = vm.StatusChan
 	vm.setupLayout()
 	vm.setupPrompts()
 	vm.startStatusListener()
 }
 
-// setupLayout initializes the main layout
 func (vm *Manager) setupLayout() {
 	vm.layout = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(vm.header, 8, 0, false).
-		AddItem(vm.Pages, 0, 1, true).
+		AddItem(vm.pages, 0, 1, true).
 		AddItem(vm.statusBar, 1, 0, false)
 }
 
 func (vm *Manager) setupPrompts() {
 	vm.prompt.SetDoneFunc(func(command string) {
 		if newFocus := vm.handleCommand(command); newFocus != nil {
-			vm.Pages.RemovePage(ModalCmdPrompt)
-			vm.App.SetFocus(newFocus)
+			vm.pages.RemovePage(ModalCmdPrompt)
+			vm.app.SetFocus(newFocus)
 		} else {
 			vm.hideModal(ModalCmdPrompt)
 		}
@@ -122,13 +126,13 @@ func (vm *Manager) setupPrompts() {
 
 func (vm *Manager) showModal(name string, content tview.Primitive, width int, height int) {
 	modal := vm.createModalFlex(content, width, height)
-	vm.Pages.AddPage(name, modal, true, true)
+	vm.pages.AddPage(name, modal, true, true)
 }
 
 func (vm *Manager) hideModal(name string) {
-	vm.Pages.RemovePage(name)
+	vm.pages.RemovePage(name)
 	if vm.activeView != nil {
-		vm.App.SetFocus(vm.activeView.GetContent())
+		vm.app.SetFocus(vm.activeView.Content())
 	}
 }
 
@@ -163,7 +167,7 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 			return nil, nil
 		},
 		"exit": func() (tview.Primitive, error) {
-			vm.App.Stop()
+			vm.app.Stop()
 			return nil, nil
 		},
 	}
@@ -183,46 +187,13 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 
 // Run starts the application
 func (vm *Manager) Run() error {
-	vm.App.SetRoot(vm.layout, true)
-	vm.App.EnableMouse(true)
-	vm.App.SetInputCapture(vm.globalInputHandler)
-	return vm.App.Run()
+	vm.app.SetRoot(vm.layout, true)
+	vm.app.EnableMouse(true)
+	vm.app.SetInputCapture(vm.globalInputHandler)
+	return vm.app.Run()
 }
 
-type ComponentType string
-
-type Style struct {
-	Border          bool
-	BorderColor     tcell.Color
-	Title           string
-	TitleAlign      int
-	TitleColor      tcell.Color
-	BackgroundColor tcell.Color
-	TextColor       tcell.Color
-}
-
-type Component struct {
-	ID         string
-	Type       ComponentType
-	Direction  int
-	FixedSize  int
-	Proportion int
-	Focus      bool
-	Style      Style
-	Properties map[string]any
-	Children   []Component
-	Help       []components.HelpCommand
-}
-
-type LayoutConfig struct {
-	Title       string
-	Components  []Component
-	Direction   int
-	FixedSizes  []int
-	Proportions []int
-}
-
-func (vm *Manager) CreateLayout(cfg LayoutConfig) tview.Primitive {
+func (vm *Manager) CreateLayout(cfg types.LayoutConfig) tview.Primitive {
 	flex := tview.NewFlex().SetDirection(cfg.Direction)
 	for _, comp := range cfg.Components {
 		prim := vm.buildPrimitiveFromComponent(comp)
@@ -231,11 +202,11 @@ func (vm *Manager) CreateLayout(cfg LayoutConfig) tview.Primitive {
 	return flex
 }
 
-func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
+func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitive {
 	var primitive tview.Primitive
 
 	switch c.Type {
-	case ComponentList:
+	case types.ComponentList:
 		list := tview.NewList().ShowSecondaryText(false)
 		applyStyleToBox(list, c.Style)
 		if items, ok := c.Properties["items"].([]string); ok {
@@ -251,7 +222,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 
 		list.SetFocusFunc(func() {
 			vm.focusedComponentID = c.ID
-			if help, ok := c.Properties["help"].(components.HelpCategory); ok {
+			if help, ok := c.Properties["newHelp"].(help.HelpCategory); ok {
 				vm.help.SetContextHelp(&help)
 			} else {
 				vm.help.ClearContextHelp()
@@ -294,7 +265,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 
 		primitive = list
 
-	case ComponentTable:
+	case types.ComponentTable:
 		table := tview.NewTable()
 		applyStyleToBox(table, c.Style)
 
@@ -319,7 +290,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 
 		primitive = table
 
-	case ComponentTextView:
+	case types.ComponentTextView:
 		textView := tview.NewTextView()
 		applyStyleToBox(textView, c.Style)
 
@@ -344,7 +315,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 
 		primitive = textView
 
-	case ComponentFlex:
+	case types.ComponentFlex:
 		flex := tview.NewFlex().SetDirection(c.Direction)
 		applyStyleToBox(flex, c.Style)
 
@@ -362,7 +333,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 
 		primitive = flex
 
-	case ComponentInputField:
+	case types.ComponentInputField:
 		input := tview.NewInputField()
 		applyStyleToBox(input, c.Style)
 
@@ -408,9 +379,9 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 		input.SetFocusFunc(func() {
 			vm.focusedComponentID = c.ID
 
-			// Update help context if help is visible
+			// Update newHelp context if newHelp is visible
 			if len(c.Help) > 0 {
-				helpCategory := &components.HelpCategory{
+				helpCategory := &help.HelpCategory{
 					Title:    c.Style.Title,
 					Commands: c.Help,
 				}
@@ -427,7 +398,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 		input.SetBlurFunc(func() {
 			if vm.focusedComponentID == c.ID {
 				vm.focusedComponentID = ""
-				// Don't clear context help here anymore
+				// Don't clear context newHelp
 			}
 			if origOnBlur != nil {
 				origOnBlur(input)
@@ -435,22 +406,22 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 		})
 
 		primitive = input
-	case ComponentHelp:
-		help := components.NewHelp()
-		applyStyleToBox(help, c.Style)
+	case types.ComponentHelp:
+		newHelp := help.NewHelp()
+		applyStyleToBox(newHelp, c.Style)
 
-		// Apply any help-specific properties
-		if commands, ok := c.Properties["commands"].([]components.HelpCommand); ok {
-			help.SetCommands(commands)
+		// Apply any newHelp-specific properties
+		if commands, ok := c.Properties["commands"].([]help.Command); ok {
+			newHelp.SetCommands(commands)
 		}
-		if onFocus, ok := c.Properties["onFocus"].(func(*components.Help)); ok {
-			help.SetFocusFunc(onFocus)
+		if onFocus, ok := c.Properties["onFocus"].(func(*help.Help)); ok {
+			newHelp.SetFocusFunc(onFocus)
 		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*components.Help)); ok {
-			help.SetBlurFunc(onBlur)
+		if onBlur, ok := c.Properties["onBlur"].(func(*help.Help)); ok {
+			newHelp.SetBlurFunc(onBlur)
 		}
 
-		primitive = help
+		primitive = newHelp
 	}
 	if c.ID != "" && primitive != nil {
 		vm.primitivesByID[c.ID] = primitive
@@ -459,8 +430,8 @@ func (vm *Manager) buildPrimitiveFromComponent(c Component) tview.Primitive {
 	return primitive
 }
 
-func (vm *Manager) RegisterView(view services.View) error {
-	if view, exists := vm.views[view.Name()]; exists {
+func (vm *Manager) RegisterView(view views.View) error {
+	if _, exists := vm.views[view.Name()]; exists {
 		return fmt.Errorf("view %s already registered", view.Name())
 	}
 	vm.views[view.Name()] = view
@@ -480,10 +451,10 @@ func (vm *Manager) SwitchToView(name string) error {
 	vm.activeView = view
 	view.Show()
 
-	if !vm.Pages.HasPage(name) {
-		vm.Pages.AddPage(name, view.GetContent(), true, true)
+	if !vm.pages.HasPage(name) {
+		vm.pages.AddPage(name, view.Content(), true, true)
 	}
-	vm.Pages.SwitchToPage(name)
+	vm.pages.SwitchToPage(name)
 	vm.header.ClearSummary()
 	vm.statusBar.SetText(fmt.Sprintf("Status: %s view active", name))
 	vm.header.SetTitle(fmt.Sprintf(" Cloud Cutter - %s ", name)).SetTitleColor(tcell.ColorYellow)
@@ -491,7 +462,7 @@ func (vm *Manager) SwitchToView(name string) error {
 	return nil
 }
 
-func (vm *Manager) UpdateHeader(summary []components.SummaryItem) {
+func (vm *Manager) UpdateHeader(summary []types.SummaryItem) {
 	vm.header.UpdateSummary(summary)
 }
 
@@ -504,12 +475,12 @@ func (vm *Manager) ViewContext() context.Context {
 }
 
 func (vm *Manager) hidePrompt() {
-	vm.Pages.RemovePage("modalPrompt")
-	vm.App.SetFocus(vm.activeView.GetContent())
+	vm.pages.RemovePage("modalPrompt")
+	vm.app.SetFocus(vm.activeView.Content())
 }
 
 func (vm *Manager) SetFocus(p tview.Primitive) {
-	vm.App.SetFocus(p)
+	vm.app.SetFocus(p)
 }
 
 func (vm *Manager) IsModalVisible() bool {
@@ -517,7 +488,7 @@ func (vm *Manager) IsModalVisible() bool {
 		return true
 	}
 
-	if page, _ := vm.Pages.GetFrontPage(); page != "" {
+	if page, _ := vm.pages.GetFrontPage(); page != "" {
 		for _, name := range []string{ModalCmdPrompt, ModalFilter, ModalHelp} {
 			if page == name {
 				return true
@@ -534,9 +505,9 @@ func (vm *Manager) hideAllModals() {
 }
 
 func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
-	currentFocus := vm.App.GetFocus()
-	if view, ok := vm.activeView.(services.View); ok {
-		if view.GetActiveField() == "filterPrompt" {
+	currentFocus := vm.app.GetFocus()
+	if view, ok := vm.activeView.(views.View); ok {
+		if view.ActiveField() == "filterPrompt" {
 			return vm.activeView.InputHandler()(event)
 		}
 	}
@@ -545,9 +516,9 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Rune() {
 		case '?':
 			if !vm.help.IsVisible() {
-				vm.help.Show(vm.Pages, func() {
+				vm.help.Show(vm.pages, func() {
 					if vm.activeView != nil {
-						vm.App.SetFocus(currentFocus)
+						vm.app.SetFocus(currentFocus)
 					}
 				})
 				return nil
@@ -577,24 +548,24 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyEsc {
 		// Handle escape key hierarchically
 		if vm.help.IsVisible() {
-			vm.help.Hide(vm.Pages)
+			vm.help.Hide(vm.pages)
 			if vm.activeView != nil {
-				vm.App.SetFocus(currentFocus)
+				vm.app.SetFocus(currentFocus)
 			}
 			return nil
 		}
-		if vm.Pages.HasPage("modalPrompt") {
-			vm.Pages.RemovePage("modalPrompt")
+		if vm.pages.HasPage("modalPrompt") {
+			vm.pages.RemovePage("modalPrompt")
 			if vm.activeView != nil {
-				vm.App.SetFocus(vm.activeView.GetContent())
+				vm.app.SetFocus(vm.activeView.Content())
 			}
 			return nil
 		}
-		if vm.Pages.HasPage("filterModal") {
+		if vm.pages.HasPage("filterModal") {
 			vm.HideFilterPrompt()
 			return nil
 		}
-		if vm.Pages.HasPage("profileSelector") {
+		if vm.pages.HasPage("profileSelector") {
 			vm.hideProfileSelector()
 			return nil
 		}
@@ -602,82 +573,14 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	}
 	return event
 }
-
-func (vm *Manager) showFilterPrompt() {
-	// Store currently focused primitive before changing focus
-	previousFocus := vm.App.GetFocus()
-
-	vm.filterPrompt.SetText("")
-	vm.filterPrompt.InputField.SetLabel(" > ").SetLabelColor(tcell.ColorTeal)
-	vm.filterPrompt.SetTitle(" Filter ")
-	vm.filterPrompt.SetBorder(true)
-	vm.filterPrompt.SetTitleAlign(tview.AlignLeft)
-	vm.filterPrompt.SetBorderColor(tcell.ColorMediumTurquoise)
-
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(
-			tview.NewFlex().
-				AddItem(nil, 0, 1, false).
-				AddItem(vm.filterPrompt, 50, 0, true).
-				AddItem(nil, 0, 1, false),
-			3, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	vm.Pages.AddPage("filterModal", modal, true, true)
-	vm.App.SetFocus(vm.filterPrompt.InputField)
-
-	if view, ok := vm.activeView.(interface {
-		HandleFilter(*components.Prompt, tview.Primitive)
-	}); ok {
-		view.HandleFilter(vm.filterPrompt, previousFocus)
-	}
-}
-func (vm *Manager) HideFilterPrompt() {
-	vm.Pages.RemovePage("filterModal")
-	if vm.activeView != nil {
-		vm.App.SetFocus(vm.activeView.GetContent())
-	}
-}
-func (vm *Manager) DetermineDirection(direction int) int {
-	// Ensure the direction is either FlexRow or FlexColumn
-	if direction == tview.FlexRow || direction == tview.FlexColumn {
-		return direction
-	}
-	return tview.FlexColumn
-}
-
-func (vm *Manager) GetPrimitiveByID(id string) tview.Primitive {
-	return vm.primitivesByID[id]
-}
-
-func applyStyleToBox(box tview.Primitive, style Style) {
-	if b, ok := box.(interface {
-		SetBorder(bool) *tview.Box
-		SetTitle(string) *tview.Box
-		SetTitleAlign(int) *tview.Box
-		SetTitleColor(tcell.Color) *tview.Box
-		SetBorderColor(tcell.Color) *tview.Box
-	}); ok {
-		if style.Border {
-			b.SetBorder(true)
-			if style.Title != "" {
-				b.SetTitle(style.Title).SetTitleAlign(style.TitleAlign).SetTitleColor(style.TitleColor)
-			}
-			b.SetBorderColor(style.BorderColor)
-		}
-	}
-}
-
 func (vm *Manager) switchToDevProfile() error {
-	if vm.profileManager.IsAuthenticating() {
+	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
 		vm.StatusChan <- status
 		return fmt.Errorf(status)
 	}
 
-	vm.profileManager.SwitchProfile(vm.ctx, "opal_dev", func(cfg aws.Config, err error) {
+	vm.profileHandler.SwitchProfile(vm.ctx, "opal_dev", func(cfg aws.Config, err error) {
 		if err != nil {
 			vm.StatusChan <- fmt.Sprintf("Failed to switch to dev profile: %v", err)
 			return
@@ -697,13 +600,13 @@ func (vm *Manager) switchToDevProfile() error {
 }
 
 func (vm *Manager) switchToProdProfile() error {
-	if vm.profileManager.IsAuthenticating() {
+	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
 		vm.StatusChan <- status
 		return fmt.Errorf(status)
 	}
 
-	vm.profileManager.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
+	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
 		if err != nil {
 			vm.StatusChan <- fmt.Sprintf("Failed to switch to prod profile: %v", err)
 			return
@@ -717,7 +620,6 @@ func (vm *Manager) switchToProdProfile() error {
 		}
 
 		vm.StatusChan <- "Successfully switched to prod profile"
-		return
 	})
 
 	return nil
@@ -744,10 +646,11 @@ func (vm *Manager) reinitializeViews() error {
 }
 
 func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
-	profileSelector := components.NewProfileSelector(
+	profileSelector := profile.NewSelector(
+		vm.profileHandler,
 		func(profile string) {
-			vm.Pages.RemovePage("profileSelector")
-			vm.App.SetFocus(vm.activeView.GetContent())
+			vm.pages.RemovePage("profileSelector")
+			vm.app.SetFocus(vm.activeView.Content())
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
 
@@ -758,9 +661,10 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 			}
 		},
 		func() {
-			vm.Pages.RemovePage("profileSelector")
-			vm.App.SetFocus(vm.activeView.GetContent())
+			vm.pages.RemovePage("profileSelector")
+			vm.app.SetFocus(vm.activeView.Content())
 		},
+		vm.statusBar,
 	)
 
 	numEntries := profileSelector.GetItemCount() + 2
@@ -774,21 +678,21 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 			numEntries, 1, true).
 		AddItem(nil, 0, 1, false)
 
-	vm.Pages.AddPage("profileSelector", modal, true, true)
+	vm.pages.AddPage("profileSelector", modal, true, true)
 	return profileSelector, nil
 }
 
 func (vm *Manager) hideProfileSelector() {
-	vm.Pages.RemovePage("profileSelector")
+	vm.pages.RemovePage("profileSelector")
 	if vm.activeView != nil {
-		vm.App.SetFocus(vm.activeView.GetContent())
+		vm.app.SetFocus(vm.activeView.Content())
 	}
 }
 
 func (vm *Manager) hideHelp() {
-	vm.Pages.RemovePage(ModalHelp)
+	vm.pages.RemovePage(ModalHelp)
 	if vm.activeView != nil {
-		vm.App.SetFocus(vm.activeView.GetContent())
+		vm.app.SetFocus(vm.activeView.Content())
 	}
 }
 
@@ -804,15 +708,16 @@ func (vm *Manager) startStatusListener() {
 				return
 			case status := <-vm.StatusChan:
 				vm.statusBar.SetText(status)
-				vm.App.Draw()
+				vm.app.Draw()
 			}
 		}
 	}()
 }
 
 func (vm *Manager) ShowFilterPrompt(modal tview.Primitive) {
-	vm.Pages.AddPage("filterModal", modal, true, true)
+	vm.pages.AddPage("filterModal", modal, true, true)
 }
+
 func (vm *Manager) UpdateRegion(region string) error {
 	cfg := vm.awsConfig.Copy()
 	cfg.Region = region
@@ -830,31 +735,109 @@ func (vm *Manager) UpdateRegion(region string) error {
 	return nil
 }
 
-func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
-	regionSelector := components.NewRegionSelector(
-		func(region string) {
-			vm.Pages.RemovePage("regionSelector")
-			vm.App.SetFocus(vm.activeView.GetContent())
+func (vm *Manager) showPrompt() {
+	vm.prompt.InputField.SetLabel(" > ")
+	vm.prompt.InputField.SetLabelColor(tcell.ColorTeal)
+	vm.prompt.SetTitle(" Command ")
+	vm.prompt.SetBorder(true)
+	vm.prompt.SetTitleAlign(tview.AlignLeft)
+	vm.prompt.SetBorderColor(tcell.ColorMediumTurquoise)
 
-			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
+	vm.app.SetFocus(vm.prompt.InputField)
 
-			cfg := vm.awsConfig.Copy()
-			cfg.Region = region
-			vm.awsConfig = cfg
+	vm.showModal(ModalCmdPrompt, vm.prompt, 50, 3)
+}
 
-			vm.header.UpdateEnvVar("Region", region)
+func (vm *Manager) CurrentProfile() string {
+	return vm.profileHandler.GetCurrentProfile()
+}
 
-			if err := vm.reinitializeViews(); err != nil {
-				vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-				return
+func (vm *Manager) showFilterPrompt() {
+	// Store currently focused primitive before changing focus
+	previousFocus := vm.app.GetFocus()
+
+	vm.filterPrompt.SetText("")
+	vm.filterPrompt.InputField.SetLabel(" > ").SetLabelColor(tcell.ColorTeal)
+	vm.filterPrompt.SetTitle(" Filter ")
+	vm.filterPrompt.SetBorder(true)
+	vm.filterPrompt.SetTitleAlign(tview.AlignLeft)
+	vm.filterPrompt.SetBorderColor(tcell.ColorMediumTurquoise)
+
+	modal := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(
+			tview.NewFlex().
+				AddItem(nil, 0, 1, false).
+				AddItem(vm.filterPrompt, 50, 0, true).
+				AddItem(nil, 0, 1, false),
+			3, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	vm.pages.AddPage("filterModal", modal, true, true)
+	vm.app.SetFocus(vm.filterPrompt.InputField)
+
+	if view, ok := vm.activeView.(interface {
+		HandleFilter(*components.Prompt, tview.Primitive)
+	}); ok {
+		view.HandleFilter(vm.filterPrompt, previousFocus)
+	}
+}
+func (vm *Manager) HideFilterPrompt() {
+	vm.pages.RemovePage("filterModal")
+	if vm.activeView != nil {
+		vm.app.SetFocus(vm.activeView.Content())
+	}
+}
+func (vm *Manager) DetermineDirection(direction int) int {
+	// Ensure the direction is either FlexRow or FlexColumn
+	if direction == tview.FlexRow || direction == tview.FlexColumn {
+		return direction
+	}
+	return tview.FlexColumn
+}
+
+func (vm *Manager) GetPrimitiveByID(id string) tview.Primitive {
+	return vm.primitivesByID[id]
+}
+
+func applyStyleToBox(box tview.Primitive, style types.Style) {
+	if b, ok := box.(interface {
+		SetBorder(bool) *tview.Box
+		SetTitle(string) *tview.Box
+		SetTitleAlign(int) *tview.Box
+		SetTitleColor(tcell.Color) *tview.Box
+		SetBorderColor(tcell.Color) *tview.Box
+	}); ok {
+		if style.Border {
+			b.SetBorder(true)
+			if style.Title != "" {
+				b.SetTitle(style.Title).SetTitleAlign(style.TitleAlign).SetTitleColor(style.TitleColor)
 			}
+			b.SetBorderColor(style.BorderColor)
+		}
+	}
+}
 
-			vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
+func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
+	regionSelector := region.NewRegionSelector(
+		// First argument
+		func(region string) {
+			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
+			if err := vm.UpdateRegion(region); err != nil {
+				vm.StatusChan <- fmt.Sprintf("Error switching region: %v", err)
+			} else {
+				vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
+			}
 		},
+		// Second argument
 		func() {
-			vm.Pages.RemovePage("regionSelector")
-			vm.App.SetFocus(vm.activeView.GetContent())
+			vm.pages.RemovePage("regionSelector")
+			vm.app.SetFocus(vm.activeView.Content())
 		},
+		// Third argument: *statusbar.StatusBar
+		vm.statusBar,
+		vm, // Fourth argument: ManagerInterface
 	)
 
 	numEntries := regionSelector.GetItemCount() + 2
@@ -868,30 +851,13 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 			numEntries, 1, true).
 		AddItem(nil, 0, 1, false)
 
-	vm.Pages.AddPage("regionSelector", modal, true, true)
+	vm.pages.AddPage("regionSelector", modal, true, true)
 	return regionSelector, nil
 }
 
 func (vm *Manager) hideRegionSelector() {
-	vm.Pages.RemovePage("regionSelector")
+	vm.pages.RemovePage("regionSelector")
 	if vm.activeView != nil {
-		vm.App.SetFocus(vm.activeView.GetContent())
+		vm.app.SetFocus(vm.activeView.Content())
 	}
-}
-
-func (vm *Manager) showPrompt() {
-	vm.prompt.InputField.SetLabel(" > ")
-	vm.prompt.InputField.SetLabelColor(tcell.ColorTeal)
-	vm.prompt.SetTitle(" Command ")
-	vm.prompt.SetBorder(true)
-	vm.prompt.SetTitleAlign(tview.AlignLeft)
-	vm.prompt.SetBorderColor(tcell.ColorMediumTurquoise)
-
-	vm.App.SetFocus(vm.prompt.InputField)
-
-	vm.showModal(ModalCmdPrompt, vm.prompt, 50, 3)
-}
-
-func (vm *Manager) CurrentProfile() string {
-	return vm.profileManager.currentProfile
 }

@@ -1,9 +1,10 @@
-package components
+package header
 
 import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
 )
 
 type Action struct {
@@ -99,7 +100,7 @@ func (h *Header) UpdateEnvVar(key, value string) {
 	h.leftTable.SetCell(row, 1, tview.NewTableCell("  ")) // Spacer
 }
 
-func (h *Header) UpdateSummary(items []SummaryItem) {
+func (h *Header) UpdateSummary(items []types.SummaryItem) {
 	h.rightTable.Clear()
 	h.rightTable.SetTitle("Summary").SetTitleAlign(tview.AlignRight)
 

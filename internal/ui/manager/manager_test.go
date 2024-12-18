@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
 	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
 	"testing"
 	"time"
 
@@ -34,8 +35,8 @@ func NewTestView(name string) *TestView {
 func (v *TestView) Name() string                                        { return v.name }
 func (v *TestView) Show()                                               { v.shown = true }
 func (v *TestView) Hide()                                               { v.hidden = true; v.shown = false }
-func (v *TestView) GetContent() tview.Primitive                         { return v.content }
-func (v *TestView) GetActiveField() string                              { return v.activeField }
+func (v *TestView) Content() tview.Primitive                            { return v.content }
+func (v *TestView) ActiveField() string                                 { return v.activeField }
 func (v *TestView) InputHandler() func(*tcell.EventKey) *tcell.EventKey { return nil }
 
 func (v *TestView) HandleFilter(prompt *components2.Prompt, previousFocus tview.Primitive) {
@@ -150,7 +151,7 @@ func TestGlobalInputHandling(t *testing.T) {
 func TestHeaderAndStatusUpdates(t *testing.T) {
 	vm, _ := setupTestManager(t)
 
-	summary := []components2.SummaryItem{
+	summary := []header.SummaryItem{
 		{Key: "Test1", Value: "Value1"},
 		{Key: "Test2", Value: "Value2"},
 	}
@@ -609,7 +610,7 @@ func TestModalFocusBehavior(t *testing.T) {
 	vm.RegisterView(view)
 	vm.SwitchToView("test")
 
-	initialContent := view.GetContent()
+	initialContent := view.Content()
 
 	// Show prompt and verify focus change
 	vm.showPrompt()
@@ -617,7 +618,7 @@ func TestModalFocusBehavior(t *testing.T) {
 
 	// Hide prompt and verify focus returns
 	vm.hidePrompt()
-	assert.Equal(t, initialContent, view.GetContent())
+	assert.Equal(t, initialContent, view.Content())
 
 	// Show filter and verify focus change
 	vm.ShowFilterPrompt(vm.Pages)
@@ -625,5 +626,5 @@ func TestModalFocusBehavior(t *testing.T) {
 
 	// Hide filter and verify focus returns
 	vm.HideFilterPrompt()
-	assert.Equal(t, initialContent, view.GetContent())
+	assert.Equal(t, initialContent, view.Content())
 }
