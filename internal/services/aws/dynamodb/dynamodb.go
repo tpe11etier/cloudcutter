@@ -7,21 +7,25 @@ import (
 	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-type Service struct {
-	Client    *awsdynamodb.Client
-	awsConfig aws.Config
+type Interface interface {
+	ListTables(ctx context.Context) ([]string, error)
+	DescribeTable(ctx context.Context, tableName string) (*dynamodbtypes.TableDescription, error)
+	ScanTable(ctx context.Context, tableName string) ([]map[string]dynamodbtypes.AttributeValue, error)
 }
 
-func NewService(cfg aws.Config) *Service {
-	client := awsdynamodb.NewFromConfig(cfg)
+type Service struct {
+	client *awsdynamodb.Client
+}
+
+func NewService(cfg aws.Config) Interface {
 	return &Service{
-		Client: client,
+		client: awsdynamodb.NewFromConfig(cfg),
 	}
 }
 
-func (s *Service) ListAllTables(ctx context.Context) ([]string, error) {
+func (s *Service) ListTables(ctx context.Context) ([]string, error) {
 	var tableNames []string
-	paginator := awsdynamodb.NewListTablesPaginator(s.Client, &awsdynamodb.ListTablesInput{})
+	paginator := awsdynamodb.NewListTablesPaginator(s.client, &awsdynamodb.ListTablesInput{})
 
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
@@ -30,12 +34,11 @@ func (s *Service) ListAllTables(ctx context.Context) ([]string, error) {
 		}
 		tableNames = append(tableNames, output.TableNames...)
 	}
-
 	return tableNames, nil
 }
 
 func (s *Service) DescribeTable(ctx context.Context, tableName string) (*dynamodbtypes.TableDescription, error) {
-	output, err := s.Client.DescribeTable(ctx, &awsdynamodb.DescribeTableInput{
+	output, err := s.client.DescribeTable(ctx, &awsdynamodb.DescribeTableInput{
 		TableName: aws.String(tableName),
 	})
 	if err != nil {
@@ -50,7 +53,7 @@ func (s *Service) ScanTable(ctx context.Context, tableName string) ([]map[string
 		TableName: aws.String(tableName),
 		Limit:     aws.Int32(100),
 	}
-	paginator := awsdynamodb.NewScanPaginator(s.Client, input)
+	paginator := awsdynamodb.NewScanPaginator(s.client, input)
 
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
@@ -59,6 +62,5 @@ func (s *Service) ScanTable(ctx context.Context, tableName string) ([]map[string
 		}
 		items = append(items, output.Items...)
 	}
-
 	return items, nil
 }

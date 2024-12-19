@@ -8,13 +8,9 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 )
 
-type Reinitializer interface {
-	Reinitialize(cfg aws.Config)
-}
-
 type Services struct {
 	EC2      *ec2.Service
-	DynamoDB *dynamodb.Service
+	DynamoDB dynamodb.Interface
 	Elastic  *elastic.Service
 	Region   string
 }
@@ -36,4 +32,13 @@ func New(cfg aws.Config, region string) (*Services, error) {
 		Elastic:  elasticService,
 		Region:   region,
 	}, nil
+}
+
+func (s *Services) ReinitializeWithConfig(cfg aws.Config) {
+	s.EC2 = ec2.NewService(cfg)
+	s.DynamoDB = dynamodb.NewService(cfg)
+	if elasticService, err := elastic.NewService(cfg); err == nil {
+		s.Elastic = elasticService
+	}
+	s.Region = cfg.Region
 }

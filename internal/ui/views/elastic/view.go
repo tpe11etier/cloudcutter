@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
-	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
@@ -30,7 +31,6 @@ type viewComponents struct {
 	filterInput      *tview.InputField
 	activeFilters    *tview.TextView
 	indexView        *tview.InputField
-	selectedView     *tview.TextView
 	fieldList        *tview.List
 	resultsTable     *tview.Table
 	localFilterInput *tview.InputField
@@ -43,7 +43,7 @@ type viewState struct {
 	filterMode      bool
 	currentIndex    string
 	matchingIndices []string
-	currentResults  []*LogEntry
+	currentResults  []*DocEntry
 	originalFields  []string
 	fieldListFilter string
 	currentFilter   string
@@ -63,7 +63,6 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 		},
 	}
 
-	//v.components.pages = tview.NewPages()
 	v.setupLayout()
 	manager.SetFocus(v.components.filterInput)
 	return v, nil
@@ -77,7 +76,7 @@ func (v *View) setupLayout() {
 				// Control Panel section
 				Type:      types.ComponentFlex,
 				Direction: tview.FlexRow,
-				FixedSize: 15,
+				FixedSize: 12,
 				Children: []types.Component{
 					{
 						ID:        "filterInput",
@@ -90,31 +89,6 @@ func (v *View) setupLayout() {
 						},
 						Properties: map[string]any{
 							"label":                " ES Filter >_ ",
-							"labelColor":           tcell.ColorMediumTurquoise,
-							"fieldBackgroundColor": tcell.ColorBlack,
-							"fieldTextColor":       tcell.ColorBeige,
-							"fieldWidth":           0,
-							"onFocus": func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorMediumTurquoise)
-							},
-							"onBlur": func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorBeige)
-							},
-						},
-					},
-					{
-						ID:        "localFilterInput",
-						Type:      types.ComponentInputField,
-						FixedSize: 3,
-						Style: types.Style{
-							Border:      true,
-							BorderColor: tcell.ColorBeige,
-							TitleAlign:  tview.AlignLeft,
-							Title:       " Filter Results ",
-							TitleColor:  tcell.ColorYellow,
-						},
-						Properties: map[string]any{
-							"label":                ">_ ",
 							"labelColor":           tcell.ColorMediumTurquoise,
 							"fieldBackgroundColor": tcell.ColorBlack,
 							"fieldTextColor":       tcell.ColorBeige,
@@ -215,24 +189,27 @@ func (v *View) setupLayout() {
 						},
 					},
 					{
-						ID:        "selectedView",
-						Type:      types.ComponentTextView,
+						ID:        "localFilterInput",
+						Type:      types.ComponentInputField,
 						FixedSize: 3,
 						Style: types.Style{
 							Border:      true,
 							BorderColor: tcell.ColorBeige,
-							Title:       " Selected Fields ",
-							TitleAlign:  tview.AlignCenter,
+							TitleAlign:  tview.AlignLeft,
+							Title:       " Filter Results ",
 							TitleColor:  tcell.ColorYellow,
 						},
 						Properties: map[string]any{
-							"items":         []string{},
-							"dynamicColors": true,
-							"onFocus": func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorMediumTurquoise)
+							"label":                ">_ ",
+							"labelColor":           tcell.ColorMediumTurquoise,
+							"fieldBackgroundColor": tcell.ColorBlack,
+							"fieldTextColor":       tcell.ColorBeige,
+							"fieldWidth":           0,
+							"onFocus": func(inputField *tview.InputField) {
+								inputField.SetBorderColor(tcell.ColorMediumTurquoise)
 							},
-							"onBlur": func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorBeige)
+							"onBlur": func(inputField *tview.InputField) {
+								inputField.SetBorderColor(tcell.ColorBeige)
 							},
 						},
 					},
@@ -257,6 +234,7 @@ func (v *View) setupLayout() {
 							"selectedBackgroundColor": tcell.ColorDarkCyan,
 							"selectedTextColor":       tcell.ColorBeige,
 							"showSecondaryText":       false,
+							"textColor":               tcell.ColorBeige,
 							"onFocus": func(list *tview.List) {
 								list.SetBorderColor(tcell.ColorMediumTurquoise)
 							},
@@ -296,7 +274,6 @@ func (v *View) setupLayout() {
 	v.components.filterInput = v.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	v.components.activeFilters = v.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
 	v.components.indexView = v.manager.GetPrimitiveByID("indexView").(*tview.InputField)
-	v.components.selectedView = v.manager.GetPrimitiveByID("selectedView").(*tview.TextView)
 	v.components.fieldList = v.manager.GetPrimitiveByID("fieldList").(*tview.List)
 	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 	v.components.localFilterInput = v.manager.GetPrimitiveByID("localFilterInput").(*tview.InputField)
@@ -353,9 +330,6 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 				v.showIndexSelector()
 				return nil
 			}
-		case tcell.KeyEsc:
-			v.manager.App().SetFocus(v.components.filterInput)
-			return nil
 		}
 
 		switch currentFocus {
@@ -367,6 +341,8 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			return v.handleIndexInput(event)
 		case v.components.fieldList:
 			return v.handleFieldList(event)
+		case v.components.resultsTable:
+			return v.handleResultsTable(event)
 		case v.components.localFilterInput:
 			return event
 		}
@@ -378,17 +354,18 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 	switch currentFocus {
 	case v.components.filterInput:
-		v.manager.App().SetFocus(v.components.localFilterInput)
-	case v.components.localFilterInput:
 		v.manager.App().SetFocus(v.components.activeFilters)
 	case v.components.activeFilters:
 		v.manager.App().SetFocus(v.components.indexView)
 	case v.components.indexView:
 		v.manager.App().SetFocus(v.components.timeframeInput)
 	case v.components.timeframeInput:
+		v.manager.App().SetFocus(v.components.localFilterInput)
+	case v.components.localFilterInput:
 		v.manager.App().SetFocus(v.components.fieldList)
 	case v.components.fieldList:
 		v.manager.App().SetFocus(v.components.resultsTable)
+
 	case v.components.resultsTable:
 		v.manager.App().SetFocus(v.components.filterInput)
 	default:
@@ -455,21 +432,6 @@ func (v *View) deleteSelectedFilter() {
 	row, _ := v.components.activeFilters.GetScrollOffset()
 	if row < len(v.state.filters) {
 		v.deleteFilterByIndex(row)
-	}
-}
-
-func (v *View) updateSelectedFieldsDisplay() {
-	var selectedFields []string
-	for field, active := range v.state.activeFields {
-		if active {
-			selectedFields = append(selectedFields, "[yellow]"+field+"[-]")
-		}
-	}
-
-	if len(selectedFields) == 0 {
-		v.components.selectedView.SetText("No fields selected")
-	} else {
-		v.components.selectedView.SetText(strings.Join(selectedFields, " | "))
 	}
 }
 
@@ -627,8 +589,14 @@ func (v *View) initFields() {
 
 	var result struct {
 		Hits struct {
-			Hits []struct {
-				Source json.RawMessage `json:"_source"`
+			Total int `json:"total"`
+			Hits  []struct {
+				ID      string          `json:"_id"`
+				Index   string          `json:"_index"`
+				Type    string          `json:"_type"`
+				Score   *float64        `json:"_score"`
+				Version *int64          `json:"_version"`
+				Source  json.RawMessage `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
@@ -638,20 +606,33 @@ func (v *View) initFields() {
 		return
 	}
 
+	// Initialize field set
 	fieldSet := make(map[string]bool)
 
+	v.state.currentResults = make([]*DocEntry, 0, len(result.Hits.Hits))
 	for _, hit := range result.Hits.Hits {
-		entry, err := NewLogEntry(hit.Source)
+		entry, err := NewDocEntry(
+			hit.Source,
+			hit.ID,
+			hit.Index,
+			hit.Type,
+			hit.Score,
+			hit.Version,
+		)
 		if err != nil {
 			continue
 		}
 
+		// Get all fields including metadata and document fields
 		fields := entry.GetAvailableFields()
 		for _, field := range fields {
 			fieldSet[field] = true
 		}
+
+		v.state.currentResults = append(v.state.currentResults, entry)
 	}
 
+	// Convert field set to slice
 	var fields []string
 	for field := range fieldSet {
 		fields = append(fields, field)
@@ -662,7 +643,7 @@ func (v *View) initFields() {
 	v.state.fieldOrder = make([]string, len(v.state.originalFields))
 	copy(v.state.fieldOrder, v.state.originalFields)
 
-	// Now populate the UI list once using fieldOrder
+	// Populate the UI list
 	for _, field := range v.state.fieldOrder {
 		fieldName := field
 		v.components.fieldList.AddItem(fieldName, "", 0, func() {
@@ -730,12 +711,12 @@ func (v *View) displayFilteredResults(filterText string) {
 		matches, len(v.state.currentResults), filterText))
 }
 
-func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Primitive) {
-	var opts components2.PromptOptions
+func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primitive) {
+	var opts components.PromptOptions
 
 	switch previousFocus {
 	case v.components.filterInput:
-		opts = components2.PromptOptions{
+		opts = components.PromptOptions{
 			Title:      " Filter Query ",
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
@@ -754,7 +735,7 @@ func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Prim
 		}
 
 	case v.components.fieldList:
-		opts = components2.PromptOptions{
+		opts = components.PromptOptions{
 			Title:      " Filter Fields ",
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
@@ -776,7 +757,7 @@ func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Prim
 		}
 
 	case v.components.localFilterInput:
-		opts = components2.PromptOptions{
+		opts = components.PromptOptions{
 			Title:      " Filter Results ",
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
@@ -814,7 +795,6 @@ func (v *View) Reinitialize(cfg aws.Config) {
 	v.state.filters = nil
 	v.components.fieldList.Clear()
 	v.components.resultsTable.Clear()
-	v.components.selectedView.SetText("No fields selected")
 
 	// Re-run initialization
 	v.initFields()
@@ -858,7 +838,6 @@ func (v *View) toggleField(field string) {
 		v.rebuildFieldList()
 	}
 
-	v.updateSelectedFieldsDisplay()
 	v.refreshResults()
 }
 
@@ -1080,7 +1059,12 @@ func (v *View) fetchAndStoreResults() {
 		Hits struct {
 			Total int `json:"total"`
 			Hits  []struct {
-				Source json.RawMessage `json:"_source"`
+				ID      string          `json:"_id"`
+				Index   string          `json:"_index"`
+				Type    string          `json:"_type"`
+				Score   *float64        `json:"_score"`
+				Version *int64          `json:"_version"`
+				Source  json.RawMessage `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
@@ -1090,9 +1074,16 @@ func (v *View) fetchAndStoreResults() {
 		return
 	}
 
-	v.state.currentResults = make([]*LogEntry, 0, len(result.Hits.Hits))
+	v.state.currentResults = make([]*DocEntry, 0, len(result.Hits.Hits))
 	for _, hit := range result.Hits.Hits {
-		entry, err := NewLogEntry(hit.Source)
+		entry, err := NewDocEntry(
+			hit.Source,
+			hit.ID,
+			hit.Index,
+			hit.Type,
+			hit.Score,
+			hit.Version,
+		)
 		if err != nil {
 			continue
 		}
@@ -1128,4 +1119,83 @@ func (v *View) moveFieldInOrder(field string, isActive bool) {
 		// For simplicity, just append at the bottom:
 		v.state.fieldOrder = append(v.state.fieldOrder, field)
 	}
+}
+
+func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyEnter:
+		row, _ := v.components.resultsTable.GetSelection()
+		if row > 0 && row <= len(v.state.currentResults) { // row 0 is header
+			v.showJSONModal(v.state.currentResults[row-1])
+		}
+		return nil
+	}
+	return event
+}
+
+func (v *View) showJSONModal(entry *DocEntry) {
+	data := map[string]interface{}{
+		"_id":    entry.ID,
+		"_index": entry.Index,
+		"_type":  entry.Type,
+	}
+	if entry.Score != nil {
+		data["_score"] = *entry.Score
+	}
+	if entry.Version != nil {
+		data["_version"] = *entry.Version
+	}
+
+	data["_source"] = entry.data
+
+	prettyJSON, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error formatting JSON: %v", err))
+		return
+	}
+
+	jsonStr := string(prettyJSON)
+
+	textView := tview.NewTextView()
+	textView.SetTitle("'y' to copy").SetTitleColor(tcell.ColorYellow)
+	textView.SetText(string(prettyJSON)).
+		SetDynamicColors(true).
+		SetRegions(true).
+		SetScrollable(true).
+		SetWrap(false)
+	textView.SetBorder(true).SetBorderColor(tcell.ColorMediumTurquoise)
+
+	frame := tview.NewFrame(textView).
+		SetBorders(0, 0, 0, 0, 0, 0)
+
+	grid := tview.NewGrid().
+		SetColumns(0, 150, 0).
+		SetRows(0, 40, 0)
+
+	// Add the frame to the center of the grid
+	grid.AddItem(frame, 1, 1, 1, 1, 0, 0, true)
+
+	grid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			v.manager.Pages().RemovePage(manager.ModalJSON)
+			v.manager.App().SetFocus(v.components.resultsTable)
+			return nil
+		case tcell.KeyRune:
+			if event.Rune() == 'y' {
+				// Copy to clipboard
+				if err := clipboard.WriteAll(jsonStr); err != nil {
+					v.manager.UpdateStatusBar("Failed to copy JSON to clipboard")
+				} else {
+					v.manager.UpdateStatusBar("JSON copied to clipboard")
+				}
+				return nil
+			}
+		}
+		return event
+	})
+
+	pages := v.manager.Pages()
+	pages.AddPage(manager.ModalJSON, grid, true, true)
+	v.manager.App().SetFocus(textView)
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
@@ -32,8 +31,7 @@ const (
 	ModalCmdPrompt = "modalPrompt"
 	ModalFilter    = "filterModal"
 	ModalHelp      = "helpModal"
-	ModalProfile   = "profileSelector"
-	ModalRegion    = "regionSelector"
+	ModalJSON      = "jsonModal"
 )
 
 // Manager represents the main view manager
@@ -117,10 +115,12 @@ func (vm *Manager) setupPrompts() {
 		} else {
 			vm.hideModal(ModalCmdPrompt)
 		}
+		vm.prompt.InputField.SetText("")
 	})
 
 	vm.prompt.SetCancelFunc(func() {
 		vm.hideModal(ModalCmdPrompt)
+		vm.prompt.InputField.SetText("")
 	})
 }
 
@@ -146,12 +146,6 @@ func (vm *Manager) createModalFlex(content tview.Primitive, width int, height in
 			AddItem(nil, 0, 1, false),
 			height, 1, true).
 		AddItem(nil, 0, 1, false)
-}
-
-func (vm *Manager) updateConfig(updateFn func(aws.Config) aws.Config) error {
-	cfg := updateFn(vm.awsConfig)
-	vm.awsConfig = cfg
-	return vm.reinitializeViews()
 }
 
 func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
@@ -209,10 +203,15 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 	case types.ComponentList:
 		list := tview.NewList().ShowSecondaryText(false)
 		applyStyleToBox(list, c.Style)
+
 		if items, ok := c.Properties["items"].([]string); ok {
 			for _, item := range items {
 				list.AddItem(item, "", 0, nil)
 			}
+		}
+
+		if textColor, ok := c.Properties["textColor"].(tcell.Color); ok {
+			list.SetMainTextColor(textColor)
 		}
 
 		var origOnFocus func(*tview.List)
@@ -274,6 +273,7 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 				table.SetSelectedStyle(tcell.StyleDefault.Foreground(textColor).Background(bgColor))
 			}
 		}
+
 		if onFocus, ok := c.Properties["onFocus"].(func(*tview.Table)); ok {
 			table.SetFocusFunc(func() { onFocus(table) })
 		}
@@ -379,7 +379,6 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 		input.SetFocusFunc(func() {
 			vm.focusedComponentID = c.ID
 
-			// Update newHelp context if newHelp is visible
 			if len(c.Help) > 0 {
 				helpCategory := &help.HelpCategory{
 					Title:    c.Style.Title,
@@ -398,7 +397,6 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 		input.SetBlurFunc(func() {
 			if vm.focusedComponentID == c.ID {
 				vm.focusedComponentID = ""
-				// Don't clear context newHelp
 			}
 			if origOnBlur != nil {
 				origOnBlur(input)
@@ -410,7 +408,6 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 		newHelp := help.NewHelp()
 		applyStyleToBox(newHelp, c.Style)
 
-		// Apply any newHelp-specific properties
 		if commands, ok := c.Properties["commands"].([]help.Command); ok {
 			newHelp.SetCommands(commands)
 		}
@@ -525,7 +522,7 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			}
 			return event
 		case ':':
-			vm.showPrompt()
+			vm.showCmdPrompt()
 			return nil
 		case '/':
 			vm.showFilterPrompt()
@@ -546,7 +543,14 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	if event.Key() == tcell.KeyEsc {
-		// Handle escape key hierarchically
+		if !vm.IsModalVisible() && vm.activeView != nil {
+			if handler := vm.activeView.InputHandler(); handler != nil {
+				if result := handler(event); result == nil {
+					return nil
+				}
+			}
+		}
+
 		if vm.help.IsVisible() {
 			vm.help.Hide(vm.pages)
 			if vm.activeView != nil {
@@ -631,11 +635,18 @@ func (vm *Manager) reinitializeViews() error {
 		currentViewName = vm.activeView.Name()
 	}
 
-	// Reinitialize all views with new config
-	for _, view := range vm.views {
-		if reinitView, ok := view.(services.Reinitializer); ok {
-			reinitView.Reinitialize(vm.awsConfig)
+	var reinitErrors []error
+
+	for name, view := range vm.views {
+		if reinitView, ok := view.(views.Reinitializer); ok {
+			if err := reinitView.Reinitialize(vm.awsConfig); err != nil {
+				reinitErrors = append(reinitErrors, fmt.Errorf("failed to reinitialize %s view: %w", name, err))
+			}
 		}
+	}
+
+	if len(reinitErrors) > 0 {
+		return fmt.Errorf("reinitialization errors: %v", reinitErrors)
 	}
 
 	if currentViewName != "" {
@@ -644,7 +655,6 @@ func (vm *Manager) reinitializeViews() error {
 
 	return nil
 }
-
 func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
@@ -735,10 +745,11 @@ func (vm *Manager) UpdateRegion(region string) error {
 	return nil
 }
 
-func (vm *Manager) showPrompt() {
+func (vm *Manager) showCmdPrompt() {
 	vm.prompt.InputField.SetLabel(" > ")
 	vm.prompt.InputField.SetLabelColor(tcell.ColorTeal)
 	vm.prompt.SetTitle(" Command ")
+	vm.prompt.SetTitleColor(tcell.ColorYellow)
 	vm.prompt.SetBorder(true)
 	vm.prompt.SetTitleAlign(tview.AlignLeft)
 	vm.prompt.SetBorderColor(tcell.ColorMediumTurquoise)
@@ -789,13 +800,6 @@ func (vm *Manager) HideFilterPrompt() {
 		vm.app.SetFocus(vm.activeView.Content())
 	}
 }
-func (vm *Manager) DetermineDirection(direction int) int {
-	// Ensure the direction is either FlexRow or FlexColumn
-	if direction == tview.FlexRow || direction == tview.FlexColumn {
-		return direction
-	}
-	return tview.FlexColumn
-}
 
 func (vm *Manager) GetPrimitiveByID(id string) tview.Primitive {
 	return vm.primitivesByID[id]
@@ -821,7 +825,7 @@ func applyStyleToBox(box tview.Primitive, style types.Style) {
 
 func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 	regionSelector := region.NewRegionSelector(
-		// First argument
+		// First argument: func
 		func(region string) {
 			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
 			if err := vm.UpdateRegion(region); err != nil {
@@ -830,7 +834,7 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 				vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
 			}
 		},
-		// Second argument
+		// Second argument: func()
 		func() {
 			vm.pages.RemovePage("regionSelector")
 			vm.app.SetFocus(vm.activeView.Content())
@@ -853,11 +857,4 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 
 	vm.pages.AddPage("regionSelector", modal, true, true)
 	return regionSelector, nil
-}
-
-func (vm *Manager) hideRegionSelector() {
-	vm.pages.RemovePage("regionSelector")
-	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
-	}
 }

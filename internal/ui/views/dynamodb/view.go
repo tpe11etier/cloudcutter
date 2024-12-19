@@ -3,10 +3,10 @@ package dynamodb
 import (
 	"context"
 	"fmt"
-	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 	"sort"
 	"strings"
 	"sync"
@@ -19,12 +19,12 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
 )
 
-var _ services.Reinitializer = (*View)(nil)
+var _ views.Reinitializer = (*View)(nil)
 
 type View struct {
 	name       string
 	manager    *manager.Manager
-	service    *dynamodb.Service
+	service    dynamodb.Interface
 	leftPanel  *tview.List
 	dataTable  *tview.Table
 	tableCache map[string]*dynamodbtypes.TableDescription
@@ -41,7 +41,7 @@ type View struct {
 	wg  sync.WaitGroup
 }
 
-func NewView(manager *manager.Manager, dynamoService *dynamodb.Service) *View {
+func NewView(manager *manager.Manager, dynamoService dynamodb.Interface) *View {
 	view := &View{
 		name:       "dynamodb",
 		manager:    manager,
@@ -77,7 +77,7 @@ func (v *View) Hide() {}
 func (v *View) fetchTables() {
 	v.leftPanel.Clear()
 
-	tableNames, err := v.service.ListAllTables(v.ctx)
+	tableNames, err := v.service.ListTables(v.ctx)
 	if err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching DynamoDB tables: %v", err))
 		return
@@ -106,6 +106,7 @@ func (v *View) fetchTableDetails(tableName string) {
 		return
 	}
 
+	v.tableCache[tableName] = table
 	v.updateTableSummary(table)
 }
 
@@ -196,7 +197,7 @@ func attributeValueToString(av dynamodbtypes.AttributeValue) string {
 }
 
 func (v *View) initializeTableCache() {
-	tableNames, err := v.service.ListAllTables(v.ctx)
+	tableNames, err := v.service.ListTables(v.ctx)
 	if err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching DynamoDB tables: %v", err))
 		return
@@ -256,6 +257,7 @@ func (v *View) setupLayout() {
 					"items":                   []string{},
 					"selectedBackgroundColor": tcell.ColorDarkCyan,
 					"selectedTextColor":       tcell.ColorLightYellow,
+					"textColor":               tcell.ColorBeige,
 					"onFocus": func(list *tview.List) {
 						list.SetBorderColor(tcell.ColorMediumTurquoise)
 					},
@@ -293,7 +295,6 @@ func (v *View) setupLayout() {
 	}
 
 	v.layout = v.manager.CreateLayout(layoutCfg)
-	//v.manager.pages.AddPage("dynamodb", layout, true, true)
 
 	v.leftPanel = v.manager.GetPrimitiveByID("leftPanel").(*tview.List)
 	v.dataTable = v.manager.GetPrimitiveByID("dataTable").(*tview.Table)
@@ -488,14 +489,19 @@ func (v *View) showTableItems(tableName string) {
 	v.manager.SetFocus(v.dataTable)
 }
 
-func (v *View) Reinitialize(cfg aws.Config) {
+func (v *View) Reinitialize(cfg aws.Config) error {
+	// reinitialize the service with new config
 	v.service = dynamodb.NewService(cfg)
+
+	// clear the UI state
 	v.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.originalItems = nil
 	v.filteredItems = nil
 	v.leftPanel.Clear()
 	v.dataTable.Clear()
 
+	// Re-fetch data with new service
 	v.initializeTableCache()
 	v.Show()
+	return nil
 }

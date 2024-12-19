@@ -52,7 +52,6 @@ func NewService(cfg aws.Config) (*Service, error) {
 	return &Service{Client: client}, nil
 }
 
-// Move the transport methods into the elastic package
 func (t *awsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var body []byte
 	if req.Body != nil {

@@ -20,7 +20,7 @@ func NewStatusBar() *StatusBar {
 
 	sb.SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft).
-		SetTextColor(tcell.ColorWhite)
+		SetTextColor(tcell.ColorMediumTurquoise)
 
 	return sb
 }
