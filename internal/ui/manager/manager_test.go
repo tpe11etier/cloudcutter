@@ -156,7 +156,7 @@ package manager
 //		{Key: "Test1", Value: "Value1"},
 //		{Key: "Test2", Value: "Value2"},
 //	}
-//	vm.UpdateHeader(summary)
+//	vm.updateHeader(summary)
 //
 //	testStatus := "Test Status Message"
 //	vm.UpdateStatusBar(testStatus)

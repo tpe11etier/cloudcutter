@@ -12,8 +12,8 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/profile"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/region"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 )
 
@@ -30,8 +30,8 @@ const (
 const (
 	ModalCmdPrompt = "modalPrompt"
 	ModalFilter    = "filterModal"
-	ModalHelp      = "helpModal"
-	ModalJSON      = "jsonModal"
+	ModalHelp      = "modalHelp"
+	ModalJSON      = "modalJSON"
 )
 
 // Manager represents the main view manager
@@ -110,17 +110,18 @@ func (vm *Manager) setupLayout() {
 func (vm *Manager) setupPrompts() {
 	vm.prompt.SetDoneFunc(func(command string) {
 		if newFocus := vm.handleCommand(command); newFocus != nil {
-			vm.pages.RemovePage(ModalCmdPrompt)
+			vm.pages.RemovePage(types.ModalCmdPrompt)
 			vm.app.SetFocus(newFocus)
 		} else {
-			vm.hideModal(ModalCmdPrompt)
+			vm.HideModal(types.ModalCmdPrompt)
 		}
 		vm.prompt.InputField.SetText("")
 	})
 
 	vm.prompt.SetCancelFunc(func() {
-		vm.hideModal(ModalCmdPrompt)
+		vm.HideModal(ModalCmdPrompt)
 		vm.prompt.InputField.SetText("")
+		vm.HideModal(types.ModalCmdPrompt)
 	})
 }
 
@@ -129,7 +130,7 @@ func (vm *Manager) showModal(name string, content tview.Primitive, width int, he
 	vm.pages.AddPage(name, modal, true, true)
 }
 
-func (vm *Manager) hideModal(name string) {
+func (vm *Manager) HideModal(name string) {
 	vm.pages.RemovePage(name)
 	if vm.activeView != nil {
 		vm.app.SetFocus(vm.activeView.Content())
@@ -202,223 +203,177 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 	switch c.Type {
 	case types.ComponentList:
 		list := tview.NewList().ShowSecondaryText(false)
-		applyStyleToBox(list, c.Style)
 
-		if items, ok := c.Properties["items"].([]string); ok {
-			for _, item := range items {
+		if style, ok := c.Style.(types.ListStyle); ok {
+			applyStyleToBox(list, style.BaseStyle)
+			list.SetSelectedStyle(tcell.StyleDefault.
+				Foreground(style.SelectedTextColor).
+				Background(style.SelectedBackgroundColor))
+		}
+
+		if props, ok := c.Properties.(types.ListProperties); ok {
+			for _, item := range props.Items {
 				list.AddItem(item, "", 0, nil)
 			}
-		}
 
-		if textColor, ok := c.Properties["textColor"].(tcell.Color); ok {
-			list.SetMainTextColor(textColor)
-		}
+			list.SetFocusFunc(func() {
+				vm.focusedComponentID = c.ID
+				if len(c.Help) > 0 {
+					helpCategory := &help.HelpCategory{
+						Title:    c.ID,
+						Commands: c.Help,
+					}
+					vm.help.SetContextHelp(helpCategory)
+				} else {
+					vm.help.ClearContextHelp()
+				}
+				if props.OnFocus != nil {
+					props.OnFocus(list)
+				}
+			})
 
-		var origOnFocus func(*tview.List)
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.List)); ok {
-			origOnFocus = onFocus
-		}
-
-		list.SetFocusFunc(func() {
-			vm.focusedComponentID = c.ID
-			if help, ok := c.Properties["newHelp"].(help.HelpCategory); ok {
-				vm.help.SetContextHelp(&help)
-			} else {
-				vm.help.ClearContextHelp()
-			}
-			if origOnFocus != nil {
-				origOnFocus(list)
-			}
-		})
-
-		if bgColor, ok := c.Properties["selectedBackgroundColor"].(tcell.Color); ok {
-			if textColor, ok := c.Properties["selectedTextColor"].(tcell.Color); ok {
-				list.SetSelectedStyle(tcell.StyleDefault.Foreground(textColor).Background(bgColor))
-			}
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.List)); ok {
-			origOnBlur := onBlur
 			list.SetBlurFunc(func() {
 				if vm.focusedComponentID == c.ID {
 					vm.focusedComponentID = ""
 					vm.help.ClearContextHelp()
 				}
-				if origOnBlur != nil {
-					origOnBlur(list)
+				if props.OnBlur != nil {
+					props.OnBlur(list)
 				}
 			})
-		}
 
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.List)); ok {
-			list.SetFocusFunc(func() { onFocus(list) })
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.List)); ok {
-			list.SetBlurFunc(func() { onBlur(list) })
-		}
-		if onChanged, ok := c.Properties["onChanged"].(func(int, string, string, rune)); ok {
-			list.SetChangedFunc(onChanged)
-		}
-		if onSelected, ok := c.Properties["onSelected"].(func(int, string, string, rune)); ok {
-			list.SetSelectedFunc(onSelected)
+			if props.OnChanged != nil {
+				list.SetChangedFunc(props.OnChanged)
+			}
+			if props.OnSelected != nil {
+				list.SetSelectedFunc(props.OnSelected)
+			}
 		}
 
 		primitive = list
 
 	case types.ComponentTable:
 		table := tview.NewTable()
-		applyStyleToBox(table, c.Style)
+		if style, ok := c.Style.(types.TableStyle); ok {
+			applyStyleToBox(table, style.BaseStyle)
+			table.SetSelectedStyle(tcell.StyleDefault.
+				Foreground(style.SelectedTextColor).
+				Background(style.SelectedBackgroundColor))
+		}
 
-		if bgColor, ok := c.Properties["selectedBackgroundColor"].(tcell.Color); ok {
-			if textColor, ok := c.Properties["selectedTextColor"].(tcell.Color); ok {
-				table.SetSelectedStyle(tcell.StyleDefault.Foreground(textColor).Background(bgColor))
+		if props, ok := c.Properties.(types.TableProperties); ok {
+			if props.OnFocus != nil {
+				table.SetFocusFunc(func() { props.OnFocus(table) })
+			}
+			if props.OnBlur != nil {
+				table.SetBlurFunc(func() { props.OnBlur(table) })
+			}
+			if props.OnSelected != nil {
+				table.SetSelectedFunc(props.OnSelected)
 			}
 		}
 
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.Table)); ok {
-			table.SetFocusFunc(func() { onFocus(table) })
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.Table)); ok {
-			table.SetBlurFunc(func() { onBlur(table) })
-		}
-		if onSelected, ok := c.Properties["onSelected"].(func(row, col int)); ok {
-			table.SetSelectedFunc(func(row, col int) {
-				onSelected(row, col)
-			})
-		}
-
 		table.SetSelectable(true, false)
-
 		primitive = table
 
 	case types.ComponentTextView:
 		textView := tview.NewTextView()
-		applyStyleToBox(textView, c.Style)
-
-		if text, ok := c.Properties["text"].(string); ok {
-			textView.SetText(text)
-		}
-		if wrap, ok := c.Properties["wrap"].(bool); ok {
-			textView.SetWrap(wrap)
-		}
-		if scroll, ok := c.Properties["scrollable"].(bool); ok {
-			textView.SetScrollable(scroll)
-		}
-		if dynamic, ok := c.Properties["dynamicColors"].(bool); ok {
-			textView.SetDynamicColors(dynamic)
-		}
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.TextView)); ok {
-			textView.SetFocusFunc(func() { onFocus(textView) })
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.TextView)); ok {
-			textView.SetBlurFunc(func() { onBlur(textView) })
+		if style, ok := c.Style.(types.TextViewStyle); ok {
+			applyStyleToBox(textView, style.BaseStyle)
 		}
 
+		if props, ok := c.Properties.(types.TextViewProperties); ok {
+			textView.SetText(props.Text)
+			textView.SetWrap(props.Wrap)
+			textView.SetScrollable(props.Scrollable)
+			textView.SetDynamicColors(props.DynamicColors)
+
+			if props.OnFocus != nil {
+				textView.SetFocusFunc(func() { props.OnFocus(textView) })
+			}
+			if props.OnBlur != nil {
+				textView.SetBlurFunc(func() { props.OnBlur(textView) })
+			}
+		}
 		primitive = textView
 
 	case types.ComponentFlex:
 		flex := tview.NewFlex().SetDirection(c.Direction)
-		applyStyleToBox(flex, c.Style)
-
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.Flex)); ok {
-			flex.SetFocusFunc(func() { onFocus(flex) })
+		if style, ok := c.Style.(types.FlexStyle); ok {
+			applyStyleToBox(flex, style.BaseStyle)
 		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.Flex)); ok {
-			flex.SetBlurFunc(func() { onBlur(flex) })
+
+		if props, ok := c.Properties.(types.FlexProperties); ok {
+			if props.OnFocus != nil {
+				flex.SetFocusFunc(func() { props.OnFocus(flex) })
+			}
+			if props.OnBlur != nil {
+				flex.SetBlurFunc(func() { props.OnBlur(flex) })
+			}
 		}
 
 		for _, child := range c.Children {
 			childPrimitive := vm.buildPrimitiveFromComponent(child)
 			flex.AddItem(childPrimitive, child.FixedSize, child.Proportion, child.Focus)
 		}
-
 		primitive = flex
 
 	case types.ComponentInputField:
 		input := tview.NewInputField()
-		applyStyleToBox(input, c.Style)
-
-		if label, ok := c.Properties["label"].(string); ok {
-			input.SetLabel(label)
-		}
-		if labelColor, ok := c.Properties["labelColor"].(tcell.Color); ok {
-			input.SetLabelColor(labelColor)
-		}
-		if fieldWidth, ok := c.Properties["fieldWidth"].(int); ok {
-			input.SetFieldWidth(fieldWidth)
-		}
-		if text, ok := c.Properties["text"].(string); ok {
-			input.SetText(text)
-		}
-		if bgColor, ok := c.Properties["fieldBackgroundColor"].(tcell.Color); ok {
-			input.SetFieldBackgroundColor(bgColor)
-		}
-		if textColor, ok := c.Properties["fieldTextColor"].(tcell.Color); ok {
-			input.SetFieldTextColor(textColor)
+		if style, ok := c.Style.(types.InputFieldStyle); ok {
+			applyStyleToBox(input, style.BaseStyle)
+			input.SetLabelColor(style.LabelColor)
+			input.SetFieldBackgroundColor(style.FieldBackgroundColor)
+			input.SetFieldTextColor(style.FieldTextColor)
 		}
 
-		if doneFunc, ok := c.Properties["doneFunc"].(func(text string)); ok {
-			input.SetDoneFunc(func(key tcell.Key) {
-				if key == tcell.KeyEnter {
-					doneFunc(input.GetText())
+		if props, ok := c.Properties.(types.InputFieldProperties); ok {
+			input.SetLabel(props.Label)
+			input.SetFieldWidth(props.FieldWidth)
+			input.SetText(props.Text)
+
+			if props.DoneFunc != nil {
+				input.SetDoneFunc(func(key tcell.Key) {
+					if key == tcell.KeyEnter {
+						props.DoneFunc(input.GetText())
+					}
+				})
+			}
+			if props.ChangedFunc != nil {
+				input.SetChangedFunc(props.ChangedFunc)
+			}
+
+			input.SetFocusFunc(func() {
+				vm.focusedComponentID = c.ID
+				if len(c.Help) > 0 {
+					helpCategory := &help.HelpCategory{
+						Title:    c.ID,
+						Commands: c.Help,
+					}
+					vm.help.SetContextHelp(helpCategory)
+					if c.HelpProps != nil {
+						// Set all properties at once
+						c.HelpProps.Commands = c.Help
+						vm.help.SetProperties(*c.HelpProps)
+					} else {
+						vm.help.SetProperties(help.HelpProperties{
+							Commands: c.Help,
+						})
+					}
+				}
+				if props.OnFocus != nil {
+					props.OnFocus(input)
+				}
+			})
+
+			input.SetBlurFunc(func() {
+				if props.OnBlur != nil {
+					props.OnBlur(input)
 				}
 			})
 		}
-		if changedFunc, ok := c.Properties["changedFunc"].(func(text string)); ok {
-			input.SetChangedFunc(changedFunc)
-		}
-
-		var origOnFocus func(*tview.InputField)
-		var origOnBlur func(*tview.InputField)
-		if onFocus, ok := c.Properties["onFocus"].(func(*tview.InputField)); ok {
-			origOnFocus = onFocus
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*tview.InputField)); ok {
-			origOnBlur = onBlur
-		}
-
-		input.SetFocusFunc(func() {
-			vm.focusedComponentID = c.ID
-
-			if len(c.Help) > 0 {
-				helpCategory := &help.HelpCategory{
-					Title:    c.Style.Title,
-					Commands: c.Help,
-				}
-				vm.help.SetContextHelp(helpCategory)
-			} else {
-				vm.help.ClearContextHelp()
-			}
-
-			if origOnFocus != nil {
-				origOnFocus(input)
-			}
-		})
-
-		input.SetBlurFunc(func() {
-			if vm.focusedComponentID == c.ID {
-				vm.focusedComponentID = ""
-			}
-			if origOnBlur != nil {
-				origOnBlur(input)
-			}
-		})
-
 		primitive = input
-	case types.ComponentHelp:
-		newHelp := help.NewHelp()
-		applyStyleToBox(newHelp, c.Style)
 
-		if commands, ok := c.Properties["commands"].([]help.Command); ok {
-			newHelp.SetCommands(commands)
-		}
-		if onFocus, ok := c.Properties["onFocus"].(func(*help.Help)); ok {
-			newHelp.SetFocusFunc(onFocus)
-		}
-		if onBlur, ok := c.Properties["onBlur"].(func(*help.Help)); ok {
-			newHelp.SetBlurFunc(onBlur)
-		}
-
-		primitive = newHelp
 	}
 	if c.ID != "" && primitive != nil {
 		vm.primitivesByID[c.ID] = primitive
@@ -472,7 +427,7 @@ func (vm *Manager) ViewContext() context.Context {
 }
 
 func (vm *Manager) hidePrompt() {
-	vm.pages.RemovePage("modalPrompt")
+	vm.pages.RemovePage(types.ModalCmdPrompt)
 	vm.app.SetFocus(vm.activeView.Content())
 }
 
@@ -486,7 +441,7 @@ func (vm *Manager) IsModalVisible() bool {
 	}
 
 	if page, _ := vm.pages.GetFrontPage(); page != "" {
-		for _, name := range []string{ModalCmdPrompt, ModalFilter, ModalHelp} {
+		for _, name := range []string{types.ModalCmdPrompt, types.ModalFilter, help.ModalHelp} {
 			if page == name {
 				return true
 			}
@@ -499,6 +454,8 @@ func (vm *Manager) hideAllModals() {
 	vm.hidePrompt()
 	vm.HideFilterPrompt()
 	vm.hideProfileSelector()
+	vm.hideHelp()
+	vm.hideJSON()
 }
 
 func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
@@ -558,14 +515,14 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			}
 			return nil
 		}
-		if vm.pages.HasPage("modalPrompt") {
-			vm.pages.RemovePage("modalPrompt")
+		if vm.pages.HasPage(types.ModalCmdPrompt) {
+			vm.pages.RemovePage(types.ModalCmdPrompt)
 			if vm.activeView != nil {
 				vm.app.SetFocus(vm.activeView.Content())
 			}
 			return nil
 		}
-		if vm.pages.HasPage("filterModal") {
+		if vm.pages.HasPage(types.ModalFilter) {
 			vm.HideFilterPrompt()
 			return nil
 		}
@@ -573,6 +530,7 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			vm.hideProfileSelector()
 			return nil
 		}
+
 		return event
 	}
 	return event
@@ -700,10 +658,14 @@ func (vm *Manager) hideProfileSelector() {
 }
 
 func (vm *Manager) hideHelp() {
-	vm.pages.RemovePage(ModalHelp)
+	vm.pages.RemovePage(help.ModalHelp)
 	if vm.activeView != nil {
 		vm.app.SetFocus(vm.activeView.Content())
 	}
+}
+
+func (vm *Manager) hideJSON() {
+	vm.pages.RemovePage(ModalJSON)
 }
 
 func (vm *Manager) HideAllModals() {
@@ -725,7 +687,7 @@ func (vm *Manager) startStatusListener() {
 }
 
 func (vm *Manager) ShowFilterPrompt(modal tview.Primitive) {
-	vm.pages.AddPage("filterModal", modal, true, true)
+	vm.pages.AddPage(types.ModalFilter, modal, true, true)
 }
 
 func (vm *Manager) UpdateRegion(region string) error {
@@ -756,7 +718,7 @@ func (vm *Manager) showCmdPrompt() {
 
 	vm.app.SetFocus(vm.prompt.InputField)
 
-	vm.showModal(ModalCmdPrompt, vm.prompt, 50, 3)
+	vm.showModal(types.ModalCmdPrompt, vm.prompt, 50, 3)
 }
 
 func (vm *Manager) CurrentProfile() string {
@@ -785,7 +747,7 @@ func (vm *Manager) showFilterPrompt() {
 			3, 0, true).
 		AddItem(nil, 0, 1, false)
 
-	vm.pages.AddPage("filterModal", modal, true, true)
+	vm.pages.AddPage(types.ModalFilter, modal, true, true)
 	vm.app.SetFocus(vm.filterPrompt.InputField)
 
 	if view, ok := vm.activeView.(interface {
@@ -795,7 +757,7 @@ func (vm *Manager) showFilterPrompt() {
 	}
 }
 func (vm *Manager) HideFilterPrompt() {
-	vm.pages.RemovePage("filterModal")
+	vm.pages.RemovePage(types.ModalFilter)
 	if vm.activeView != nil {
 		vm.app.SetFocus(vm.activeView.Content())
 	}
@@ -805,7 +767,7 @@ func (vm *Manager) GetPrimitiveByID(id string) tview.Primitive {
 	return vm.primitivesByID[id]
 }
 
-func applyStyleToBox(box tview.Primitive, style types.Style) {
+func applyStyleToBox(box tview.Primitive, style types.BaseStyle) {
 	if b, ok := box.(interface {
 		SetBorder(bool) *tview.Box
 		SetTitle(string) *tview.Box
@@ -857,4 +819,15 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 
 	vm.pages.AddPage("regionSelector", modal, true, true)
 	return regionSelector, nil
+}
+
+func (vm *Manager) hideRegionSelector() {
+	vm.pages.RemovePage("regionSelector")
+	if vm.activeView != nil {
+		vm.app.SetFocus(vm.activeView.Content())
+	}
+}
+
+func (vm *Manager) Help() *help.Help {
+	return vm.help
 }

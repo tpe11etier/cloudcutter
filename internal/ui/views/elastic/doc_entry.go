@@ -134,7 +134,7 @@ func formatSeverity(sev any) string {
 	}
 }
 
-func (d *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string) {
+func (de *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string) {
 	if data == nil {
 		return
 	}
@@ -142,10 +142,10 @@ func (d *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string)
 	// Add metadata fields if we're at the root level (empty prefix)
 	if prefix == "" {
 		metaFields := []string{"_id", "_index", "_type"}
-		if d.Score != nil {
+		if de.Score != nil {
 			metaFields = append(metaFields, "_score")
 		}
-		if d.Version != nil {
+		if de.Version != nil {
 			metaFields = append(metaFields, "_version")
 		}
 		*fields = append(*fields, metaFields...)
@@ -162,7 +162,7 @@ func (d *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string)
 			if isLeafNode(value) {
 				*fields = append(*fields, newPrefix)
 			} else {
-				d.getFieldsRecursive(value, newPrefix, fields)
+				de.getFieldsRecursive(value, newPrefix, fields)
 			}
 		}
 	case []any:
