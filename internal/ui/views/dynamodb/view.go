@@ -3,9 +3,9 @@ package dynamodb
 import (
 	"context"
 	"fmt"
-	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 	"sort"
 	"strings"
@@ -240,34 +240,34 @@ func (v *View) setupLayout() {
 		Direction: tview.FlexColumn,
 		Components: []types.Component{
 			{
-				ID:         "leftPanel",
-				Type:       types.ComponentList,
-				FixedSize:  30,
-				Proportion: 0,
-				Focus:      true,
-				Style: types.Style{
-					Border:      true,
-					Title:       " DynamoDB ",
-					TitleAlign:  tview.AlignCenter,
-					TitleColor:  tcell.ColorMediumTurquoise,
-					BorderColor: tcell.ColorMediumTurquoise,
-					TextColor:   tcell.ColorBeige,
+				ID:        "leftPanel",
+				Type:      types.ComponentList,
+				FixedSize: 30,
+				Focus:     true,
+				Style: types.ListStyle{
+					BaseStyle: types.BaseStyle{
+						Border:      true,
+						Title:       " DynamoDB ",
+						TitleAlign:  tview.AlignCenter,
+						TitleColor:  tcell.ColorMediumTurquoise,
+						BorderColor: tcell.ColorMediumTurquoise,
+						TextColor:   tcell.ColorBeige,
+					},
+					SelectedTextColor:       tcell.ColorLightYellow,
+					SelectedBackgroundColor: tcell.ColorDarkCyan,
 				},
-				Properties: map[string]any{
-					"items":                   []string{},
-					"selectedBackgroundColor": tcell.ColorDarkCyan,
-					"selectedTextColor":       tcell.ColorLightYellow,
-					"textColor":               tcell.ColorBeige,
-					"onFocus": func(list *tview.List) {
+				Properties: types.ListProperties{
+					Items: []string{},
+					OnFocus: func(list *tview.List) {
 						list.SetBorderColor(tcell.ColorMediumTurquoise)
 					},
-					"onBlur": func(list *tview.List) {
+					OnBlur: func(list *tview.List) {
 						list.SetBorderColor(tcell.ColorBeige)
 					},
-					"onChanged": func(index int, mainText string, secondaryText string, shortcut rune) {
+					OnChanged: func(index int, mainText string, secondaryText string, shortcut rune) {
 						v.fetchTableDetails(mainText)
 					},
-					"onSelected": func(index int, mainText, secondaryText string, shortcut rune) {
+					OnSelected: func(index int, mainText, secondaryText string, shortcut rune) {
 						v.showTableItems(mainText)
 					},
 				},
@@ -276,17 +276,19 @@ func (v *View) setupLayout() {
 				ID:         "dataTable",
 				Type:       types.ComponentTable,
 				Proportion: 1,
-				Style: types.Style{
-					Border:      true,
-					BorderColor: tcell.ColorBeige,
+				Style: types.TableStyle{
+					BaseStyle: types.BaseStyle{
+						Border:      true,
+						BorderColor: tcell.ColorBeige,
+					},
+					SelectedTextColor:       tcell.ColorLightYellow,
+					SelectedBackgroundColor: tcell.ColorDarkCyan,
 				},
-				Properties: map[string]any{
-					"selectedBackgroundColor": tcell.ColorDarkCyan,
-					"selectedTextColor":       tcell.ColorLightYellow,
-					"onFocus": func(table *tview.Table) {
+				Properties: types.TableProperties{
+					OnFocus: func(table *tview.Table) {
 						table.SetBorderColor(tcell.ColorMediumTurquoise)
 					},
-					"onBlur": func(table *tview.Table) {
+					OnBlur: func(table *tview.Table) {
 						table.SetBorderColor(tcell.ColorBeige)
 					},
 				},
@@ -295,7 +297,6 @@ func (v *View) setupLayout() {
 	}
 
 	v.layout = v.manager.CreateLayout(layoutCfg)
-
 	v.leftPanel = v.manager.GetPrimitiveByID("leftPanel").(*tview.List)
 	v.dataTable = v.manager.GetPrimitiveByID("dataTable").(*tview.Table)
 	v.dataTable.SetSelectable(true, false)
@@ -385,12 +386,12 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	}
 }
 
-func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Primitive) {
-	var opts components2.PromptOptions
+func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primitive) {
+	var opts components.PromptOptions
 
 	switch previousFocus {
 	case v.leftPanel:
-		opts = components2.PromptOptions{
+		opts = components.PromptOptions{
 			Title:      " Filter Tables ",
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
@@ -411,7 +412,7 @@ func (v *View) HandleFilter(prompt *components2.Prompt, previousFocus tview.Prim
 			},
 		}
 	case v.dataTable:
-		opts = components2.PromptOptions{
+		opts = components.PromptOptions{
 			Title:      " Filter Items ",
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
@@ -490,10 +491,8 @@ func (v *View) showTableItems(tableName string) {
 }
 
 func (v *View) Reinitialize(cfg aws.Config) error {
-	// reinitialize the service with new config
 	v.service = dynamodb.NewService(cfg)
 
-	// clear the UI state
 	v.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.originalItems = nil
 	v.filteredItems = nil

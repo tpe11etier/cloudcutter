@@ -61,7 +61,7 @@ package ec2
 //					"onChanged": func(index int, mainText string, secondaryText string, shortcut rune) {
 //						instance, exists := v.instanceMap[mainText]
 //						if !exists || instance == nil {
-//							v.manager.UpdateHeader(nil)
+//							v.manager.updateHeader(nil)
 //							if table := v.manager.GetPrimitiveByID("dataTable").(*tview.Table); table != nil {
 //								table.Clear()
 //							}
@@ -221,7 +221,7 @@ package ec2
 //
 //func (v *View) updateEC2Summary(instance *ec2types.Instance) {
 //	if instance == nil {
-//		v.manager.UpdateHeader(nil)
+//		v.manager.updateHeader(nil)
 //		return
 //	}
 //
@@ -233,7 +233,7 @@ package ec2
 //		{Key: "Public IPv4", Value: aws.ToString(instance.PublicIpAddress)},
 //		{Key: "Launch Time", Value: instance.LaunchTime.Format("2006-01-02 15:04:05")},
 //	}
-//	v.manager.UpdateHeader(summary)
+//	v.manager.updateHeader(summary)
 //}
 //
 //func getInstanceName(instance *ec2types.Instance) *string {

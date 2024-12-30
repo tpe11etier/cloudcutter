@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ModalHelp = "helpModal"
+	ModalHelp = "modalHelp"
 )
 
 type Command struct {
@@ -20,18 +20,36 @@ type HelpCategory struct {
 	Commands []Command
 }
 
+type HelpProperties struct {
+	Commands []Command
+}
+
 type Help struct {
 	*tview.Flex
 	globalCategories []HelpCategory
-	contextCategory  *HelpCategory // Current context-specific commands
+	contextCategory  *HelpCategory
 	table            *tview.Table
+	selectedCommand  *Command
 	isVisible        bool
+	Selectable       bool
+	Props            *HelpProperties
 }
 
+func (h *Help) getCommandForRow(row int) *Command {
+	// Map table row back to Command
+	if h.contextCategory != nil {
+		if row > 0 && row <= len(h.contextCategory.Commands) {
+			return &h.contextCategory.Commands[row-1]
+		}
+	}
+	return nil
+}
 func NewHelp() *Help {
 	help := &Help{
-		Flex:  tview.NewFlex(),
-		table: tview.NewTable(),
+		Flex:       tview.NewFlex(),
+		table:      tview.NewTable(),
+		Props:      &HelpProperties{},
+		Selectable: false,
 		globalCategories: []HelpCategory{
 			{
 				Title: "General Commands",
@@ -78,7 +96,6 @@ func (h *Help) setupLayout() {
 	h.table.Clear()
 	row := 0
 
-	// If we have context-specific help, ONLY show that
 	if h.contextCategory != nil {
 		h.addCategoryToTable(h.contextCategory, &row)
 	} else {
@@ -86,37 +103,32 @@ func (h *Help) setupLayout() {
 			h.addCategoryToTable(&category, &row)
 		}
 	}
+	h.table.SetSelectable(h.Selectable, false)
 }
 
 func (h *Help) addCategoryToTable(category *HelpCategory, row *int) {
-	// Add category title
 	h.table.SetCell(*row, 0,
 		tview.NewTableCell(fmt.Sprintf("[::b]%s", category.Title)).
 			SetTextColor(tcell.ColorYellow).
 			SetAlign(tview.AlignLeft).
-			SetSelectable(false).
 			SetExpansion(1))
 	*row++
 
-	// Add commands
 	for _, cmd := range category.Commands {
 		keyCell := tview.NewTableCell(fmt.Sprintf("  [mediumturquoise]%s", cmd.Key)).
 			SetTextColor(tcell.ColorMediumTurquoise).
-			SetAlign(tview.AlignLeft).
-			SetSelectable(false)
+			SetAlign(tview.AlignLeft)
 
 		descCell := tview.NewTableCell(fmt.Sprintf("  [beige]%s", cmd.Description)).
 			SetTextColor(tcell.ColorBeige).
-			SetAlign(tview.AlignLeft).
-			SetSelectable(false)
+			SetAlign(tview.AlignLeft)
 
 		h.table.SetCell(*row, 0, keyCell)
 		h.table.SetCell(*row, 1, descCell)
 		*row++
 	}
 
-	// Add spacing after category
-	h.table.SetCell(*row, 0, tview.NewTableCell("").SetSelectable(false))
+	h.table.SetCell(*row, 0, tview.NewTableCell(""))
 	*row++
 }
 
@@ -185,4 +197,19 @@ func (h *Help) SetBlurFunc(handler func(*Help)) {
 	h.table.SetBlurFunc(func() {
 		handler(h)
 	})
+}
+
+func (h *Help) SetProperties(props HelpProperties) {
+	if h.contextCategory == nil {
+		h.contextCategory = &HelpCategory{
+			Title:    "Component Help",
+			Commands: props.Commands,
+		}
+	}
+	h.setupLayout()
+}
+
+func (h *Help) SetSelectable(b bool) {
+	h.Selectable = b
+	h.setupLayout()
 }
