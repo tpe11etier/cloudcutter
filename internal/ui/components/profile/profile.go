@@ -41,6 +41,9 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 	selector.AddItem("Production", "", 0, func() {
 		selector.switchProfile("opal_prod")
 	})
+	selector.AddItem("Local", "", 0, func() {
+		selector.switchProfile("local")
+	})
 
 	selector.SetCurrentItem(0)
 

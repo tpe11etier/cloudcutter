@@ -1,0 +1,7 @@
+{ "index": { "_index": "sample-index", "_type": "_doc", "_id": "1" } }
+{ "title": "First Document", "content": "This is the content of the first document." }
+{ "index": { "_index": "sample-index", "_type": "_doc", "_id": "2" } }
+{ "title": "Second Document", "content": "This is the content of the second document." }
+{ "index": { "_index": "sample-index", "_type": "_doc", "_id": "3" } }
+{ "title": "Third Document", "content": "This is the content of the third document." }
+

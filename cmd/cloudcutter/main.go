@@ -6,6 +6,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	awsservice "github.com/tpelletiersophos/cloudcutter/internal/services/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
 	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
@@ -53,7 +54,7 @@ func main() {
 	}
 
 	// Set initial view
-	if err := viewManager.SwitchToView("dynamodb"); err != nil {
+	if err := viewManager.SwitchToView(types.ViewDynamoDB); err != nil {
 		log.Fatalf("Failed to set initial view: %v", err)
 	}
 

@@ -5,6 +5,10 @@ GOOS=linux
 GOARCH?='$(ARCH)'
 LDFLAGS='-w -extldflags "-static"'
 
+DOCKER_COMPOSE_VERSION=v2.21.0
+OS := $(shell uname -s | tr A-Z a-z)
+
+
 TAGS=netgo
 
 .PHONY: all
@@ -57,3 +61,25 @@ codecheck:
 
 .PHONY: test
 test: test-unit 
+
+
+.PHONY: ensure-docker-compose
+ensure-docker-compose:
+	@if ! command -v docker-compose >/dev/null 2>&1; then \
+        echo "Installing Docker Compose $(DOCKER_COMPOSE_VERSION)..."; \
+        if [ "$(OS)" = "darwin" ]; then \
+            sudo curl -L "https://github.com/docker/compose/releases/download/$(DOCKER_COMPOSE_VERSION)/docker-compose-darwin-x86_64" -o /usr/local/bin/docker-compose; \
+        else \
+            sudo curl -L "https://github.com/docker/compose/releases/download/$(DOCKER_COMPOSE_VERSION)/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose; \
+        fi; \
+        sudo chmod +x /usr/local/bin/docker-compose; \
+        echo "Docker Compose installed successfully"; \
+    else \
+        echo "Docker Compose already installed"; \
+    fi
+
+es-up: ensure-docker-compose
+	cd deployments/local && docker-compose up -d elasticsearch
+
+es-down: ensure-docker-compose
+	cd deployments/local && docker-compose down

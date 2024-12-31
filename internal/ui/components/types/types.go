@@ -13,11 +13,8 @@ const (
 	ComponentTable      ComponentType = "table"
 	ComponentInputField ComponentType = "inputfield"
 
-	ViewEC2      = "ec2"
-	ViewECR      = "ecr"
 	ViewDynamoDB = "dynamodb"
 	ViewElastic  = "elastic"
-	ViewS3       = "s3"
 	ViewTest     = "test"
 
 	ModalCmdPrompt = "modalPrompt"

@@ -279,7 +279,7 @@ package testview
 //	return v.pages
 //}
 //
-//func (v *View) Show() {
+//func (v *View) Render() {
 //	v.manager.SetFocus(v.pages)
 //}
 //

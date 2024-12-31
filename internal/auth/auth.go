@@ -70,10 +70,11 @@ func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region strin
 		cfg, err = a.authenticateOpal(ctx, profile, region, a.opalConfig.ProdRoleID)
 	case "opal_dev":
 		cfg, err = a.authenticateOpal(ctx, profile, region, a.opalConfig.DevRoleID)
+	case "local":
+		cfg, err = a.authenticateLocal(ctx, region)
 	default:
 		cfg, err = a.authenticateStandard(ctx, profile, region)
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
@@ -143,4 +144,11 @@ func (a *Authenticator) sendStatus(status string) {
 	if a.onStatus != nil {
 		a.onStatus(status)
 	}
+}
+
+func (a *Authenticator) authenticateLocal(ctx context.Context, region string) (aws.Config, error) {
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion("local"),
+	}
+	return config.LoadDefaultConfig(ctx, opts...)
 }

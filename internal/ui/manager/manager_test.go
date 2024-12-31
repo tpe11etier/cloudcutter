@@ -34,7 +34,7 @@ package manager
 //}
 //
 //func (v *TestView) Name() string                                        { return v.name }
-//func (v *TestView) Show()                                               { v.shown = true }
+//func (v *TestView) Render()                                               { v.shown = true }
 //func (v *TestView) Hide()                                               { v.hidden = true; v.shown = false }
 //func (v *TestView) Content() tview.Primitive                            { return v.content }
 //func (v *TestView) ActiveField() string                                 { return v.activeField }
@@ -204,7 +204,7 @@ package manager
 ////	vm.RegisterView(view)
 ////	vm.SwitchToView("test")
 ////
-////	vm.showFilterPrompt()
+////	vm.ShowFilterPrompt()
 ////	vm.filterPrompt.SetText("test-filter")
 ////
 ////	enterEvent := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
@@ -573,7 +573,7 @@ package manager
 //	vm.RegisterView(view)
 //	vm.SwitchToView("test")
 //
-//	// Show filter and enter text
+//	// Render filter and enter text
 //	vm.ShowFilterPrompt(vm.Pages)
 //	vm.filterPrompt.SetText("test-filter")
 //
@@ -613,7 +613,7 @@ package manager
 //
 //	initialContent := view.Content()
 //
-//	// Show prompt and verify focus change
+//	// Render prompt and verify focus change
 //	vm.showPrompt()
 //	assert.NotEqual(t, initialContent, vm.prompt.InputField)
 //
@@ -621,7 +621,7 @@ package manager
 //	vm.hidePrompt()
 //	assert.Equal(t, initialContent, view.Content())
 //
-//	// Show filter and verify focus change
+//	// Render filter and verify focus change
 //	vm.ShowFilterPrompt(vm.Pages)
 //	assert.NotEqual(t, initialContent, vm.filterPrompt.InputField)
 //

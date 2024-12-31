@@ -18,19 +18,11 @@ import (
 )
 
 const (
-	ViewEC2      = "ec2"
-	ViewECR      = "ecr"
-	ViewDynamoDB = "dynamodb"
-	ViewElastic  = "elastic"
-	ViewS3       = "s3"
-	ViewTest     = "test"
-)
-
-// Modal-related constants
-const (
+	ViewEC2        = "ec2"
+	ViewDynamoDB   = "dynamodb"
+	ViewElastic    = "elastic"
+	ViewTest       = "test"
 	ModalCmdPrompt = "modalPrompt"
-	ModalFilter    = "filterModal"
-	ModalHelp      = "modalHelp"
 	ModalJSON      = "modalJSON"
 )
 
@@ -587,6 +579,32 @@ func (vm *Manager) switchToProdProfile() error {
 	return nil
 }
 
+func (vm *Manager) switchToLocalProfile() error {
+	if vm.profileHandler.IsAuthenticating() {
+		status := "Authentication already in progress"
+		vm.StatusChan <- status
+		return fmt.Errorf(status)
+	}
+
+	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
+		if err != nil {
+			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
+			return
+		}
+
+		vm.awsConfig = cfg
+		vm.header.UpdateEnvVar("Profile", "local")
+		if err := vm.reinitializeViews(); err != nil {
+			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
+			return
+		}
+
+		vm.StatusChan <- "Successfully switched to local profile"
+	})
+
+	return nil
+}
+
 func (vm *Manager) reinitializeViews() error {
 	currentViewName := ""
 	if vm.activeView != nil {
@@ -622,10 +640,13 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
 
-			if profile == "opal_dev" {
+			switch profile {
+			case "opal_dev":
 				vm.switchToDevProfile()
-			} else if profile == "opal_prod" {
+			case "opal_prod":
 				vm.switchToProdProfile()
+			case "local":
+				vm.switchToLocalProfile()
 			}
 		},
 		func() {

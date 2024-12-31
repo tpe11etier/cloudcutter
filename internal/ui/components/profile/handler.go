@@ -53,19 +53,6 @@ func (ph *Handler) GetCurrentProfile() string {
 	return ""
 }
 
-func (ph *Handler) GetCurrentConfig() aws.Config {
-	if session := ph.auth.Current(); session != nil {
-		return session.Config
-	}
-	return aws.Config{}
-}
-
-func (ph *Handler) SetRegion(region string) {
-	ph.mu.Lock()
-	defer ph.mu.Unlock()
-	ph.region = region
-}
-
 func (ph *Handler) IsAuthenticating() bool {
 	return ph.auth.IsAuthenticating()
 }

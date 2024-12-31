@@ -283,7 +283,7 @@ func (v *View) setupLayout() {
 							BaseStyle: types.BaseStyle{
 								Border:      true,
 								BorderColor: tcell.ColorBeige,
-								Title:       " Available Fields ",
+								Title:       "Available Fields (j ↓ / k ↑ to sort)",
 								TitleColor:  tcell.ColorYellow,
 							},
 							SelectedTextColor:       tcell.ColorBeige,
@@ -599,83 +599,157 @@ func (v *View) logQuery(query string) error {
 	return nil
 }
 
-func (v *View) buildQuery() map[string]any {
+func (v *View) buildQuery() map[string]interface{} {
 	timeframe := v.components.timeframeInput.GetText()
-	if timeframe == "" {
-		timeframe = "12h"
-	}
+	query := make(map[string]interface{})
 
-	boolQuery := map[string]any{
-		"must": []any{
-			map[string]any{
-				"range": map[string]any{
-					"unixTime": map[string]any{
-						"gte": fmt.Sprintf("now-%s", timeframe),
-						"lte": "now",
+	if timeframe != "" {
+		// Build time-based query for documents with unixTime field
+		boolQuery := map[string]interface{}{
+			"must": []interface{}{
+				map[string]interface{}{
+					"range": map[string]interface{}{
+						"unixTime": map[string]interface{}{
+							"gte": fmt.Sprintf("now-%s", timeframe),
+							"lte": "now",
+						},
 					},
 				},
 			},
-		},
-	}
-
-	for _, filter := range v.state.filters {
-		var parts []string
-		if strings.Contains(filter, "=") {
-			parts = strings.SplitN(filter, "=", 2)
-		} else if strings.Contains(filter, ":") {
-			parts = strings.SplitN(filter, ":", 2)
 		}
 
-		if len(parts) == 2 {
-			field := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
+		// Add filters if any
+		for _, filter := range v.state.filters {
+			parts := strings.SplitN(filter, ":", 2)
+			if len(parts) != 2 {
+				parts = strings.SplitN(filter, "=", 2)
+			}
+			if len(parts) == 2 {
+				field := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
 
-			if num, err := strconv.ParseFloat(value, 64); err == nil {
-				boolQuery["must"] = append(boolQuery["must"].([]any), map[string]any{
-					"term": map[string]any{
-						field: num,
-					},
-				})
-			} else {
-				boolQuery["must"] = append(boolQuery["must"].([]any), map[string]any{
-					"term": map[string]any{
-						field: value,
-					},
-				})
+				// Try to parse value as number
+				if num, err := strconv.ParseFloat(value, 64); err == nil {
+					boolQuery["must"] = append(boolQuery["must"].([]interface{}),
+						map[string]interface{}{
+							"term": map[string]interface{}{
+								field: num,
+							},
+						})
+				} else {
+					boolQuery["must"] = append(boolQuery["must"].([]interface{}),
+						map[string]interface{}{
+							"term": map[string]interface{}{
+								field: value,
+							},
+						})
+				}
 			}
 		}
+
+		query["query"] = map[string]interface{}{
+			"bool": boolQuery,
+		}
+	} else {
+		// Simple match_all query for basic documents
+		query["query"] = map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		}
 	}
 
-	// Build the final query
-	finalQuery := map[string]any{
-		"query": map[string]any{
-			"bool": boolQuery,
-		},
-		"sort": []map[string]any{
+	// Add size and sort
+	query["size"] = v.state.pageSize
+
+	// Only add sort if unixTime exists
+	if timeframe != "" {
+		query["sort"] = []map[string]interface{}{
 			{
-				"unixTime": map[string]any{
+				"unixTime": map[string]interface{}{
 					"order": "desc",
 				},
 			},
-		},
-		"size": 250,
-	}
-
-	prettyQuery := prettyPrintJSON(finalQuery)
-	if err := v.logQuery(prettyQuery); err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Failed to log query: %v", err))
-	} else {
-		// Copy to clipboard for easy pasting into Kibana
-		if err := clipboard.WriteAll(prettyQuery); err != nil {
-			v.manager.UpdateStatusBar(fmt.Sprintf("Failed to copy query: %v", err))
-		} else {
-			v.manager.UpdateStatusBar("Query copied to clipboard and logged to ~/.cloudcutter/logs/")
 		}
 	}
 
-	return finalQuery
+	return query
 }
 
+//	func (v *View) buildQuery() map[string]any {
+//		timeframe := v.components.timeframeInput.GetText()
+//		if timeframe == "" {
+//			timeframe = "12h"
+//		}
+//
+//		boolQuery := map[string]any{
+//			"must": []any{
+//				map[string]any{
+//					"range": map[string]any{
+//						"unixTime": map[string]any{
+//							"gte": fmt.Sprintf("now-%s", timeframe),
+//							"lte": "now",
+//						},
+//					},
+//				},
+//			},
+//		}
+//
+//		for _, filter := range v.state.filters {
+//			var parts []string
+//			if strings.Contains(filter, "=") {
+//				parts = strings.SplitN(filter, "=", 2)
+//			} else if strings.Contains(filter, ":") {
+//				parts = strings.SplitN(filter, ":", 2)
+//			}
+//
+//			if len(parts) == 2 {
+//				field := strings.TrimSpace(parts[0])
+//				value := strings.TrimSpace(parts[1])
+//
+//				if num, err := strconv.ParseFloat(value, 64); err == nil {
+//					boolQuery["must"] = append(boolQuery["must"].([]any), map[string]any{
+//						"term": map[string]any{
+//							field: num,
+//						},
+//					})
+//				} else {
+//					boolQuery["must"] = append(boolQuery["must"].([]any), map[string]any{
+//						"term": map[string]any{
+//							field: value,
+//						},
+//					})
+//				}
+//			}
+//		}
+//
+//		// Build the final query
+//		finalQuery := map[string]any{
+//			"query": map[string]any{
+//				"bool": boolQuery,
+//			},
+//			"sort": []map[string]any{
+//				{
+//					"unixTime": map[string]any{
+//						"order": "desc",
+//					},
+//				},
+//			},
+//			"size": 250,
+//		}
+//
+//		prettyQuery := prettyPrintJSON(finalQuery)
+//		if err := v.logQuery(prettyQuery); err != nil {
+//			v.manager.UpdateStatusBar(fmt.Sprintf("Failed to log query: %v", err))
+//		} else {
+//			// Copy to clipboard for easy pasting into Kibana
+//			if err := clipboard.WriteAll(prettyQuery); err != nil {
+//				v.manager.UpdateStatusBar(fmt.Sprintf("Failed to copy query: %v", err))
+//			} else {
+//				v.manager.UpdateStatusBar("Query copied to clipboard and logged to ~/.cloudcutter/logs/")
+//			}
+//		}
+//
+//		return finalQuery
+//	}
 func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEnter:
@@ -850,14 +924,15 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 	}
 
 	prompt.Configure(opts)
-	v.manager.ShowFilterPrompt(prompt.Show())
+	promptLayout := prompt.Show()
+	v.manager.ShowFilterPrompt(promptLayout)
 	v.manager.App().SetFocus(prompt.InputField)
 }
 
-func (v *View) Reinitialize(cfg aws.Config) {
+func (v *View) Reinitialize(cfg aws.Config) error {
 	if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing Elasticsearch service: %v", err))
-		return
+		return nil
 	}
 
 	// Clear old state and UI
@@ -869,9 +944,15 @@ func (v *View) Reinitialize(cfg aws.Config) {
 	v.components.resultsTable.Clear()
 
 	// Re-run initialization
-	v.initFields()
+	if err := v.initFieldsSync(); err != nil {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error initializing fields: %v", err))
+		return nil
+	}
+
+	// Trigger results refresh and redraw
 	v.refreshResults()
-	v.Show()
+	v.displayCurrentPage()
+	return nil
 }
 
 func (v *View) filterFieldList(filter string) {
@@ -954,6 +1035,10 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 			field := stripColorTags(mainText)
 			v.toggleField(field)
 		}
+		return nil
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		v.state.fieldListFilter = ""
+		v.filterFieldList("")
 		return nil
 	}
 	return event
@@ -1391,7 +1476,7 @@ func (v *View) updateStatusBar(currentPageSize int) {
 	}
 
 	if v.state.showRowNumbers {
-		statusMsg += " | [yellow]Row numbers: on[-]"
+		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)

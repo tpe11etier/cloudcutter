@@ -1,0 +1,15 @@
+version: '3'
+services:
+  elasticsearch:
+    platform: linux/amd64
+    build: .
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+volumes:
+  es_data:

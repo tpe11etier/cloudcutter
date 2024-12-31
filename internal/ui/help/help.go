@@ -56,7 +56,7 @@ func NewHelp() *Help {
 				Commands: []Command{
 					{Key: "Enter", Description: "Execute command"},
 					{Key: "Esc", Description: "Close prompt/Go back"},
-					{Key: "?", Description: "Show help"},
+					{Key: "?", Description: "Render help"},
 					{Key: "/", Description: "Filter"},
 					{Key: ":", Description: "Command prompt"},
 					{Key: "Tab", Description: "Cycle through fields"},

@@ -181,7 +181,7 @@ package ec2
 //	}
 //}
 //
-//func (v *View) Show() {
+//func (v *View) Render() {
 //	v.fetchEC2Instances()
 //}
 //

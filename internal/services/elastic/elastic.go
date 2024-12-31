@@ -28,28 +28,71 @@ type awsTransport struct {
 }
 
 func NewService(cfg aws.Config) (*Service, error) {
-	// Create AWS transport with config
-	transport := &awsTransport{
-		client: &http.Client{},
-		cfg:    cfg,
-		region: cfg.Region,
+	var esConfig elasticsearch.Config
+
+	// Check if we're using a local profile
+	if cfg.Region == "local" {
+		esConfig = elasticsearch.Config{
+			Addresses: []string{"http://localhost:9200"},
+		}
+	} else {
+		// AWS environment setup
+		transport := &awsTransport{
+			client: &http.Client{},
+			cfg:    cfg,
+			region: cfg.Region,
+		}
+
+		esEndpoint := fmt.Sprintf("https://dev-%s-primary-es.darkbytes.io", cfg.Region)
+		esConfig = elasticsearch.Config{
+			Addresses:     []string{esEndpoint},
+			Transport:     transport,
+			EnableMetrics: true,
+		}
 	}
 
-	// Create Elasticsearch client config
-	esEndpoint := fmt.Sprintf("https://dev-%s-primary-es.darkbytes.io", cfg.Region)
-	esConfig := elasticsearch.Config{
-		Addresses:     []string{esEndpoint},
-		Transport:     transport,
-		EnableMetrics: true,
-	}
-
-	// Initialize the client
 	client, err := elasticsearch.NewClient(esConfig)
 	if err != nil {
 		return nil, fmt.Errorf("error creating Elasticsearch client: %v", err)
 	}
 
 	return &Service{Client: client}, nil
+}
+
+func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
+	var esConfig elasticsearch.Config
+
+	if cfg.Region == "local" {
+		esConfig = elasticsearch.Config{
+			Addresses: []string{"http://localhost:9200"},
+		}
+	} else {
+		transport := &awsTransport{
+			client: &http.Client{},
+			cfg:    cfg,
+			region: cfg.Region,
+		}
+
+		endpointPrefix := "dev"
+		if profile == "opal_prod" {
+			endpointPrefix = "prod"
+		}
+
+		esEndpoint := fmt.Sprintf("https://%s-%s-primary-es.darkbytes.io", endpointPrefix, cfg.Region)
+		esConfig = elasticsearch.Config{
+			Addresses:     []string{esEndpoint},
+			Transport:     transport,
+			EnableMetrics: true,
+		}
+	}
+
+	newClient, err := elasticsearch.NewClient(esConfig)
+	if err != nil {
+		return fmt.Errorf("error reinitializing Elasticsearch client: %v", err)
+	}
+
+	s.Client = newClient
+	return nil
 }
 
 func (t *awsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -167,33 +210,4 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		names = append(names, idx.Index)
 	}
 	return names, nil
-}
-
-func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
-	transport := &awsTransport{
-		client: &http.Client{},
-		cfg:    cfg,
-		region: cfg.Region,
-	}
-
-	endpointPrefix := "dev"
-	if profile == "opal_prod" {
-		endpointPrefix = "prod"
-	}
-
-	esEndpoint := fmt.Sprintf("https://%s-%s-primary-es.darkbytes.io", endpointPrefix, cfg.Region)
-
-	esConfig := elasticsearch.Config{
-		Addresses:     []string{esEndpoint},
-		Transport:     transport,
-		EnableMetrics: true,
-	}
-
-	newClient, err := elasticsearch.NewClient(esConfig)
-	if err != nil {
-		return fmt.Errorf("error reinitializing Elasticsearch client: %v", err)
-	}
-
-	s.Client = newClient
-	return nil
 }

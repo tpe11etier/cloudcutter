@@ -3,6 +3,7 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -47,65 +48,6 @@ func (de *DocEntry) GetAvailableFields() []string {
 	fields := de.GetMetadataFields()
 	de.getFieldsRecursive(de.data, "", &fields)
 	return fields
-}
-
-func (de *DocEntry) GetFormattedValue(field string) string {
-	switch field {
-	case "_id":
-		return de.ID
-	case "_index":
-		return de.Index
-	case "_type":
-		return de.Type
-	case "_score":
-		if de.Score != nil {
-			return fmt.Sprintf("%v", *de.Score)
-		}
-		return ""
-	case "_version":
-		if de.Version != nil {
-			return fmt.Sprintf("%v", *de.Version)
-		}
-		return ""
-	default:
-		value := de.GetValue(field)
-		if value == nil {
-			return ""
-		}
-
-		switch field {
-		case "unixTime":
-			if ts, ok := value.(float64); ok {
-				return time.Unix(int64(ts), 0).Format(time.RFC3339)
-			}
-		case "severity":
-			return formatSeverity(value)
-		}
-
-		return fmt.Sprintf("%v", value)
-	}
-}
-func (de *DocEntry) GetValue(path string) any {
-	parts := strings.Split(path, ".")
-	current := de.data
-
-	for i, part := range parts {
-		if current == nil {
-			return nil
-		}
-
-		if i == len(parts)-1 {
-			return current[part]
-		}
-
-		switch v := current[part].(type) {
-		case map[string]any:
-			current = v
-		default:
-			return nil
-		}
-	}
-	return nil
 }
 
 func isLeafNode(v any) bool {
@@ -170,4 +112,101 @@ func (de *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string
 			*fields = append(*fields, prefix)
 		}
 	}
+}
+
+func (de *DocEntry) GetFormattedValue(field string) string {
+	switch field {
+	case "_id":
+		return de.ID
+	case "_index":
+		return de.Index
+	case "_type":
+		return de.Type
+	case "_score":
+		if de.Score != nil {
+			return fmt.Sprintf("%v", *de.Score)
+		}
+		return ""
+	case "_version":
+		if de.Version != nil {
+			return fmt.Sprintf("%v", *de.Version)
+		}
+		return ""
+	default:
+		value := de.GetValue(field)
+		if value == nil {
+			return ""
+		}
+
+		switch field {
+		case "unixTime":
+			if ts, ok := value.(float64); ok {
+				return time.Unix(int64(ts), 0).Format(time.RFC3339)
+			}
+		case "severity":
+			return formatSeverity(value)
+		case "title", "content":
+			if str, ok := value.(string); ok {
+				return str
+			}
+		}
+
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func (de *DocEntry) GetValue(path string) any {
+	parts := strings.Split(path, ".")
+	current := de.data
+
+	for i, part := range parts {
+		if current == nil {
+			return nil
+		}
+
+		// Handle array access for nested fields
+		if strings.HasSuffix(part, "]") {
+			arrayKey, index := parseArrayAccess(part)
+			if index >= 0 {
+				if arr, ok := current[arrayKey].([]any); ok && index < len(arr) {
+					if i == len(parts)-1 {
+						return arr[index]
+					}
+					if mapVal, ok := arr[index].(map[string]any); ok {
+						current = mapVal
+						continue
+					}
+				}
+			}
+			return nil
+		}
+
+		if i == len(parts)-1 {
+			return current[part]
+		}
+
+		switch v := current[part].(type) {
+		case map[string]any:
+			current = v
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+func parseArrayAccess(field string) (string, int) {
+	start := strings.Index(field, "[")
+	end := strings.Index(field, "]")
+	if start < 0 || end < 0 || end <= start {
+		return field, -1
+	}
+
+	key := field[:start]
+	indexStr := field[start+1 : end]
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		return field, -1
+	}
+	return key, index
 }
