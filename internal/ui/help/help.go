@@ -56,7 +56,7 @@ func NewHelp() *Help {
 				Commands: []Command{
 					{Key: "Enter", Description: "Execute command"},
 					{Key: "Esc", Description: "Close prompt/Go back"},
-					{Key: "?", Description: "Render help"},
+					{Key: "?", Description: "Show help"},
 					{Key: "/", Description: "Filter"},
 					{Key: ":", Description: "Command prompt"},
 					{Key: "Tab", Description: "Cycle through fields"},
@@ -66,9 +66,6 @@ func NewHelp() *Help {
 				Title: "Views",
 				Commands: []Command{
 					{Key: ":dynamodb", Description: "Switch to DynamoDB view"},
-					{Key: ":s3", Description: "Switch to S3 view"},
-					{Key: ":ec2", Description: "Switch to EC2 view"},
-					{Key: ":ecr", Description: "Switch to ECR view"},
 					{Key: ":elastic", Description: "Switch to Elastic view"},
 				},
 			},
@@ -76,7 +73,7 @@ func NewHelp() *Help {
 				Title: "AWS",
 				Commands: []Command{
 					{Key: ":region", Description: "Change AWS region"},
-					{Key: ":profile", Description: "Change Opal profile"},
+					{Key: ":profile", Description: "Change Profile"},
 				},
 			},
 		},

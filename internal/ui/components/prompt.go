@@ -82,7 +82,7 @@ func (p *Prompt) SetDoneFunc(fn func(string)) {
 	}
 }
 
-func (p *Prompt) Show() *tview.Flex {
+func (p *Prompt) Layout() *tview.Flex {
 	width := p.options.Width
 	if width == 0 {
 		width = 50

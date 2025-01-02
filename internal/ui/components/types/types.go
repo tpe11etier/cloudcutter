@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
@@ -17,11 +18,11 @@ const (
 	ViewElastic  = "elastic"
 	ViewTest     = "test"
 
-	ModalCmdPrompt = "modalPrompt"
-	ModalFilter    = "modalFilter"
-	ModalJSON      = "modalJSON"
-	ModalProfile   = "profileSelector"
-	ModalRegion    = "regionSelector"
+	ModalCmdPrompt  = "modalPrompt"
+	ModalFilter     = "modalFilter"
+	ModalRowDetails = "modalRowDetails"
+	ModalProfile    = "profileSelector"
+	ModalRegion     = "regionSelector"
 )
 
 type ComponentType string
@@ -142,4 +143,22 @@ type Component struct {
 	Children   []Component
 	Help       []help.Command
 	HelpProps  *help.HelpProperties
+}
+
+type ESSearchHit struct {
+	ID      string          `json:"_id"`
+	Index   string          `json:"_index"`
+	Type    string          `json:"_type"`
+	Score   *float64        `json:"_score"`
+	Version *int64          `json:"_version"`
+	Source  json.RawMessage `json:"_source"`
+}
+
+type ESSearchResult struct {
+	ScrollID string `json:"_scroll_id"`
+	Source   json.RawMessage
+	Hits     struct {
+		Total int           `json:"total"`
+		Hits  []ESSearchHit `json:"hits"`
+	} `json:"hits"`
 }

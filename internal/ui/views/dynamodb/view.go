@@ -3,7 +3,9 @@ package dynamodb
 import (
 	"context"
 	"fmt"
+	"github.com/atotto/clipboard"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
@@ -22,32 +24,52 @@ import (
 var _ views.Reinitializer = (*View)(nil)
 
 type View struct {
-	name       string
-	manager    *manager.Manager
-	service    dynamodb.Interface
-	leftPanel  *tview.List
-	dataTable  *tview.Table
-	tableCache map[string]*dynamodbtypes.TableDescription
+	name         string
+	manager      *manager.Manager
+	service      dynamodb.Interface
+	leftPanel    *tview.List
+	dataTable    *tview.Table
+	filterPrompt *components.Prompt
+	layout       tview.Primitive
 
-	originalItems   []map[string]dynamodbtypes.AttributeValue
-	filteredItems   []map[string]dynamodbtypes.AttributeValue
-	leftPanelFilter string
-	dataPanelFilter string
+	state viewState
+	ctx   context.Context
+	mu    sync.Mutex
+	wg    sync.WaitGroup
+}
 
-	layout tview.Primitive
-
-	ctx context.Context
-	mu  sync.Mutex
-	wg  sync.WaitGroup
+type viewState struct {
+	isLoading         bool
+	tableCache        map[string]*dynamodbtypes.TableDescription
+	originalItems     []map[string]dynamodbtypes.AttributeValue
+	filteredItems     []map[string]dynamodbtypes.AttributeValue
+	leftPanelFilter   string
+	dataPanelFilter   string
+	showRowNumbers    bool
+	visibleRows       int
+	lastDisplayHeight int
+	currentPage       int
+	pageSize          int
+	totalPages        int
+	spinner           *spinner.Spinner
 }
 
 func NewView(manager *manager.Manager, dynamoService dynamodb.Interface) *View {
 	view := &View{
-		name:       "dynamodb",
-		manager:    manager,
-		service:    dynamoService,
-		tableCache: make(map[string]*dynamodbtypes.TableDescription),
-		ctx:        manager.ViewContext(),
+		name:         "dynamodb",
+		manager:      manager,
+		service:      dynamoService,
+		filterPrompt: components.NewPrompt(),
+		state: viewState{
+			tableCache:        make(map[string]*dynamodbtypes.TableDescription),
+			showRowNumbers:    true,
+			visibleRows:       0,
+			lastDisplayHeight: 0,
+			currentPage:       1,
+			pageSize:          50,
+			totalPages:        1,
+		},
+		ctx: manager.ViewContext(),
 	}
 
 	view.setupLayout()
@@ -64,8 +86,8 @@ func (v *View) Content() tview.Primitive {
 }
 
 func (v *View) Show() {
-	if v.leftPanelFilter != "" {
-		v.filterLeftPanel(v.leftPanelFilter)
+	if v.state.leftPanelFilter != "" {
+		v.filterLeftPanel(v.state.leftPanelFilter)
 	} else {
 		v.fetchTables()
 	}
@@ -75,6 +97,7 @@ func (v *View) Show() {
 func (v *View) Hide() {}
 
 func (v *View) fetchTables() {
+	v.showLoading("Fetching tables...")
 	v.leftPanel.Clear()
 
 	tableNames, err := v.service.ListTables(v.ctx)
@@ -91,7 +114,7 @@ func (v *View) fetchTables() {
 }
 
 func (v *View) fetchTableDetails(tableName string) {
-	if table, found := v.tableCache[tableName]; found {
+	if table, found := v.state.tableCache[tableName]; found {
 		v.updateTableSummary(table)
 		return
 	}
@@ -106,7 +129,7 @@ func (v *View) fetchTableDetails(tableName string) {
 		return
 	}
 
-	v.tableCache[tableName] = table
+	v.state.tableCache[tableName] = table
 	v.updateTableSummary(table)
 }
 
@@ -215,7 +238,7 @@ func (v *View) initializeTableCache() {
 			}
 
 			v.mu.Lock()
-			v.tableCache[name] = table
+			v.state.tableCache[name] = table
 			v.mu.Unlock()
 		}(tableName)
 	}
@@ -304,6 +327,7 @@ func (v *View) setupLayout() {
 
 func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.AttributeValue) {
 	v.dataTable.Clear()
+	v.calculateVisibleRows()
 
 	if len(items) == 0 {
 		v.dataTable.SetCell(0, 0,
@@ -314,50 +338,111 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 		return
 	}
 
-	// Get and sort headers
+	totalItems := len(items)
+	v.state.pageSize = v.state.visibleRows
+	v.state.totalPages = (totalItems + v.state.pageSize - 1) / v.state.pageSize
+	if v.state.totalPages < 1 {
+		v.state.totalPages = 1
+	}
+
+	start := (v.state.currentPage - 1) * v.state.pageSize
+	end := start + v.state.pageSize
+	if end > totalItems {
+		end = totalItems
+	}
+
+	if start >= totalItems {
+		start = totalItems - v.state.pageSize
+		if start < 0 {
+			start = 0
+		}
+		end = totalItems
+	}
+
+	pageItems := items[start:end]
+
 	headers := extractSortedHeaders(items)
 	columnWidths := calculateColumnWidths(items, headers)
 
-	// Set header row
-	for col, header := range headers {
-		v.dataTable.SetCell(0, col,
-			tview.NewTableCell(header).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignCenter).
-				SetMaxWidth(columnWidths[header]).
-				SetExpansion(1).
-				SetSelectable(false).
-				SetAttributes(tcell.AttrBold))
+	displayHeaders := headers
+	if v.state.showRowNumbers {
+		displayHeaders = append([]string{"#"}, headers...)
 	}
 
-	// Set data rows
-	for row, item := range items {
-		for col, header := range headers {
+	for col, header := range displayHeaders {
+		cell := tview.NewTableCell(header).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignCenter).
+			SetSelectable(false).
+			SetAttributes(tcell.AttrBold)
+
+		if v.state.showRowNumbers && col == 0 {
+			cell.SetMaxWidth(2).
+				SetExpansion(0).
+				SetText("#")
+		} else {
+			cell.SetMaxWidth(columnWidths[header]).
+				SetExpansion(1)
+		}
+		v.dataTable.SetCell(0, col, cell)
+	}
+
+	for rowIdx, item := range pageItems {
+		currentRow := rowIdx + 1
+		currentCol := 0
+
+		if v.state.showRowNumbers {
+			v.dataTable.SetCell(currentRow, currentCol,
+				tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
+					SetTextColor(tcell.ColorGray).
+					SetAlign(tview.AlignRight).
+					SetMaxWidth(3).
+					SetExpansion(0).
+					SetSelectable(false))
+			currentCol++
+		}
+
+		for _, header := range headers {
 			value := attributeValueToString(item[header])
-			v.dataTable.SetCell(row+1, col,
+			v.dataTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(strings.TrimSpace(value)).
 					SetTextColor(tcell.ColorBeige).
 					SetAlign(tview.AlignLeft).
 					SetMaxWidth(columnWidths[header]).
 					SetExpansion(1).
 					SetSelectable(true))
+			currentCol++
 		}
 	}
 
 	v.dataTable.SetFixed(1, 0)
-	v.dataTable.Select(1, 0)
+	if len(pageItems) > 0 {
+		v.dataTable.Select(1, 0)
+	}
+
+	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d items",
+		v.state.currentPage, v.state.totalPages,
+		len(pageItems), totalItems)
+	if v.state.showRowNumbers {
+		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
+	}
+	v.manager.UpdateStatusBar(statusMsg)
 }
 
 func (v *View) filterLeftPanel(filter string) {
 	if filter == "" {
-		v.fetchTables()
+		v.leftPanel.Clear()
+		for tableName := range v.state.tableCache {
+			v.leftPanel.AddItem(tableName, "", 0, nil)
+		}
+		v.manager.UpdateStatusBar("Showing all tables")
 		return
 	}
 
 	filter = strings.ToLower(filter)
 	v.leftPanel.Clear()
 
-	for tableName := range v.tableCache {
+	for tableName := range v.state.tableCache {
 		if strings.Contains(strings.ToLower(tableName), filter) {
 			v.leftPanel.AddItem(tableName, "", 0, nil)
 		}
@@ -368,19 +453,58 @@ func (v *View) filterLeftPanel(filter string) {
 
 func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	return func(event *tcell.EventKey) *tcell.EventKey {
+		currentFocus := v.manager.App().GetFocus()
+
+		if event.Key() == tcell.KeyRune {
+			switch event.Rune() {
+			case 'n', 'p':
+				if currentFocus == v.dataTable {
+					if event.Rune() == 'n' {
+						v.nextPage()
+					} else {
+						v.previousPage()
+					}
+					return nil
+				}
+			case '/':
+				switch currentFocus {
+				case v.leftPanel:
+					v.showFilterPrompt(v.leftPanel)
+					return nil
+				case v.dataTable:
+					v.showFilterPrompt(v.dataTable)
+					return nil
+				}
+			case 'r':
+				if currentFocus == v.dataTable {
+					v.toggleRowNumbers()
+					return nil
+				}
+			}
+		}
+
 		switch event.Key() {
-		case tcell.KeyEsc:
-			v.manager.HideAllModals()
-			v.manager.SetFocus(v.leftPanel)
-			return nil
 		case tcell.KeyTab:
-			currentFocus := v.manager.App().GetFocus()
 			if currentFocus == v.leftPanel {
 				v.manager.SetFocus(v.dataTable)
 			} else {
 				v.manager.SetFocus(v.leftPanel)
 			}
 			return nil
+		case tcell.KeyEnter:
+			if currentFocus == v.dataTable {
+				return v.handleResultsTable(event)
+			}
+		case tcell.KeyBackspace, tcell.KeyBackspace2, tcell.KeyEsc:
+			if currentFocus == v.leftPanel {
+				v.state.leftPanelFilter = ""
+				v.filterLeftPanel("")
+				return nil
+			}
+			if event.Key() == tcell.KeyEsc && currentFocus == v.dataTable {
+				v.manager.SetFocus(v.leftPanel)
+				return nil
+			}
 		}
 		return event
 	}
@@ -396,13 +520,13 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
 			OnDone: func(text string) {
-				v.leftPanelFilter = text
+				v.state.leftPanelFilter = text
 				v.filterLeftPanel(text)
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
 			},
 			OnCancel: func() {
-				v.leftPanelFilter = ""
+				v.state.leftPanelFilter = ""
 				v.filterLeftPanel("")
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
@@ -417,13 +541,13 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 			Label:      " >_ ",
 			LabelColor: tcell.ColorMediumTurquoise,
 			OnDone: func(text string) {
-				v.dataPanelFilter = text
+				v.state.dataPanelFilter = text
 				v.filterItems(text)
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
 			},
 			OnCancel: func() {
-				v.dataPanelFilter = ""
+				v.state.dataPanelFilter = ""
 				v.filterItems("")
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
@@ -435,18 +559,339 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 	}
 
 	prompt.Configure(opts)
-	v.manager.ShowFilterPrompt(prompt.Show())
+	promptLayout := prompt.Layout()
+	v.manager.Pages().AddPage(types.ModalFilter, promptLayout, true, true)
 	v.manager.App().SetFocus(prompt.InputField)
 }
 
+func (v *View) showTableItems(tableName string) {
+	v.showLoading(fmt.Sprintf("Fetching items for table %s...", tableName))
+	go func() {
+		items, err := v.service.ScanTable(v.ctx, tableName)
+
+		// Make sure UI updates happen in the main thread
+		v.manager.App().QueueUpdateDraw(func() {
+			defer v.hideLoading()
+
+			if err != nil {
+				v.manager.UpdateStatusBar(fmt.Sprintf("Error scanning table %s: %v", tableName, err))
+				return
+			}
+
+			v.state.originalItems = items
+			v.state.filteredItems = items
+
+			if v.state.dataPanelFilter != "" {
+				v.filterItems(v.state.dataPanelFilter)
+			} else {
+				v.updateDataTableForItems(items)
+			}
+			v.manager.SetFocus(v.dataTable)
+		})
+	}()
+}
+func (v *View) Reinitialize(cfg aws.Config) error {
+	v.service = dynamodb.NewService(cfg)
+
+	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
+	v.state.originalItems = nil
+	v.state.filteredItems = nil
+	v.leftPanel.Clear()
+	v.dataTable.Clear()
+
+	// Re-fetch data with new service
+	v.initializeTableCache()
+	v.Show()
+	return nil
+}
+
+func (v *View) showLoading(message string) {
+	if v.state.spinner == nil {
+		v.state.spinner = spinner.NewSpinner(message)
+		v.state.spinner.SetOnComplete(func() {
+			pages := v.manager.Pages()
+			pages.RemovePage("loading")
+		})
+	} else {
+		v.state.spinner.SetMessage(message)
+	}
+
+	if !v.state.spinner.IsLoading() {
+		modal := spinner.CreateSpinnerModal(v.state.spinner)
+		pages := v.manager.Pages()
+		pages.AddPage("loading", modal, true, true)
+		v.state.spinner.Start(v.manager.App())
+	}
+}
+
+func (v *View) hideLoading() {
+	if v.state.spinner != nil {
+		v.state.spinner.Stop()
+	}
+}
+
+func (v *View) showFilterPrompt(source tview.Primitive) {
+	previousFocus := source
+
+	switch source {
+	case v.leftPanel:
+		v.filterPrompt.Configure(components.PromptOptions{
+			Title:      " Filter Tables ",
+			Label:      " >_ ",
+			LabelColor: tcell.ColorMediumTurquoise,
+			OnDone: func(text string) {
+				v.state.leftPanelFilter = text
+				v.filterLeftPanel(text)
+				v.manager.Pages().RemovePage(types.ModalFilter)
+				v.manager.SetFocus(previousFocus)
+			},
+			OnCancel: func() {
+				v.state.leftPanelFilter = ""
+				v.filterLeftPanel("")
+				v.manager.Pages().RemovePage(types.ModalFilter)
+				v.manager.SetFocus(previousFocus)
+			},
+			OnChanged: func(text string) {
+				v.filterLeftPanel(text)
+			},
+		})
+
+	case v.dataTable:
+		v.filterPrompt.Configure(components.PromptOptions{
+			Title:      " Filter Items ",
+			Label:      " >_ ",
+			LabelColor: tcell.ColorMediumTurquoise,
+			OnDone: func(text string) {
+				v.state.dataPanelFilter = text
+				v.filterItems(text)
+				v.manager.Pages().RemovePage(types.ModalFilter)
+				v.manager.SetFocus(previousFocus)
+			},
+			OnCancel: func() {
+				v.state.dataPanelFilter = ""
+				v.filterItems("")
+				v.manager.Pages().RemovePage(types.ModalFilter)
+				v.manager.SetFocus(previousFocus)
+			},
+			OnChanged: func(text string) {
+				v.filterItems(text)
+			},
+		})
+	}
+
+	v.filterPrompt.SetText("")
+	promptLayout := v.filterPrompt.Layout()
+	v.manager.Pages().AddPage(types.ModalFilter, promptLayout, true, true)
+	v.manager.App().SetFocus(v.filterPrompt.InputField)
+}
+
+func (v *View) calculateVisibleRows() {
+	// Get the current screen size
+	_, _, _, height := v.dataTable.GetInnerRect()
+
+	if height == v.state.lastDisplayHeight {
+		return // No need to recalculate if height hasn't changed
+	}
+
+	v.state.lastDisplayHeight = height
+
+	// Subtract 1 for header row and 1 for border
+	v.state.visibleRows = height - 2
+
+	// Ensure minimum of 1 row
+	if v.state.visibleRows < 1 {
+		v.state.visibleRows = 1
+	}
+}
+
+func (v *View) toggleRowNumbers() {
+	v.state.showRowNumbers = !v.state.showRowNumbers
+	v.updateDataTableForItems(v.state.filteredItems) // Refresh the display
+}
+
+func (v *View) nextPage() {
+	if v.state.totalPages < 1 {
+		v.state.totalPages = 1
+	}
+
+	if v.state.currentPage < v.state.totalPages {
+		v.state.currentPage++
+		v.updateDataTableForItems(v.state.filteredItems)
+	} else {
+		v.manager.UpdateStatusBar("Already on the last page.")
+	}
+}
+
+func (v *View) previousPage() {
+	if v.state.totalPages < 1 {
+		v.state.totalPages = 1
+	}
+
+	if v.state.currentPage > 1 {
+		v.state.currentPage--
+		v.updateDataTableForItems(v.state.filteredItems)
+	} else {
+		v.manager.UpdateStatusBar("Already on the first page.")
+	}
+}
+
+func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyEnter:
+		row, _ := v.dataTable.GetSelection()
+		if row > 0 { // Header is row 0
+			// Calculate which item to show based on pagination
+			start := (v.state.currentPage - 1) * v.state.pageSize
+			itemIndex := start + row - 1 // -1 because row 0 is header
+
+			if itemIndex < len(v.state.filteredItems) {
+				v.showItemDetails(v.state.filteredItems[itemIndex])
+			}
+		}
+		return nil
+	}
+	return event
+}
+
+func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
+	// Create a new table for displaying item details
+	table := tview.NewTable()
+	table.SetSelectable(true, false).
+		SetFixed(1, 0) // Fix the header row
+
+	// Extract the attribute names from the item
+	attributes := make([]string, 0, len(item))
+	for attr := range item {
+		attributes = append(attributes, attr)
+	}
+	sort.Strings(attributes)
+
+	// Determine the maximum attribute name and value length for dynamic sizing
+	maxAttrLen := 0
+	maxValLen := 0
+	for _, attr := range attributes {
+		if len(attr) > maxAttrLen {
+			maxAttrLen = len(attr)
+		}
+		value := attributeValueToString(item[attr])
+		if len(value) > maxValLen {
+			maxValLen = len(value)
+		}
+	}
+
+	// Set a maximum width to prevent overly wide modals
+	const minModalWidth = 50
+	const maxModalWidth = 120
+	calculatedWidth := maxAttrLen + maxValLen + 4 // Additional padding
+	if calculatedWidth > maxModalWidth {
+		calculatedWidth = maxModalWidth
+	}
+	if calculatedWidth < minModalWidth {
+		calculatedWidth = minModalWidth
+	}
+
+	// Populate the table with attribute-value pairs
+	for row, attr := range attributes {
+		value := attributeValueToString(item[attr])
+
+		// Attribute cell
+		attrCell := tview.NewTableCell(attr).
+			SetTextColor(tcell.ColorMediumTurquoise).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false)
+		table.SetCell(row+1, 0, attrCell)
+
+		// Value cell
+		valueCell := tview.NewTableCell(value).
+			SetTextColor(tcell.ColorBeige).
+			SetAlign(tview.AlignLeft).
+			SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan)).
+			SetSelectable(true)
+		table.SetCell(row+1, 1, valueCell)
+	}
+
+	// Add borders and title for the table
+	table.SetBorder(true).
+		SetTitle(" Item Details (ESC to close, 'y' to copy value) ").
+		SetTitleColor(tcell.ColorYellow).
+		SetBorderColor(tcell.ColorMediumTurquoise)
+
+	// Calculate modal height based on the number of attributes
+	// Add extra rows for padding and header
+	modalHeight := len(attributes) + 4 // 1 for header, 2 for padding, 1 buffer
+
+	// Set a minimum and maximum height to ensure the modal isn't too small or too large
+	const minModalHeight = 10
+	const maxModalHeight = 30
+	if modalHeight < minModalHeight {
+		modalHeight = minModalHeight
+	} else if modalHeight > maxModalHeight {
+		modalHeight = maxModalHeight
+	}
+
+	v.showModal(table, types.ModalRowDetails, calculatedWidth, modalHeight, func() {
+		v.manager.App().SetFocus(v.dataTable)
+	})
+
+	// Handle key events for the table
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyRune:
+			if event.Rune() == 'y' || event.Rune() == 'Y' {
+				row, col := table.GetSelection()
+				if row > 0 && col == 1 {
+					cell := table.GetCell(row, col)
+					value := cell.Text
+					// Copy to clipboard
+					if err := clipboard.WriteAll(value); err != nil {
+						v.manager.UpdateStatusBar("Failed to copy value to clipboard")
+					} else {
+						v.manager.UpdateStatusBar("Value copied to clipboard")
+					}
+				}
+				return nil
+			}
+		}
+		return event
+	})
+}
+
+func (v *View) showModal(modal tview.Primitive, name string, width, height int, onDismiss func()) {
+	if v.manager.Pages().HasPage(name) {
+		return
+	}
+
+	// Create a new grid to center the modal
+	modalGrid := tview.NewGrid().
+		SetRows(0, height, 0).
+		SetColumns(0, width, 0).
+		SetBorders(false).
+		AddItem(modal, 1, 1, 1, 1, 0, 0, true)
+
+	// Set input capture to handle dismissal
+	modalGrid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEsc {
+			v.manager.Pages().RemovePage(name)
+			if onDismiss != nil {
+				onDismiss()
+			}
+			return nil
+		}
+		return event
+	})
+
+	v.manager.Pages().AddPage(name, modalGrid, true, true)
+	v.manager.App().SetFocus(modal)
+}
+
 func (v *View) filterItems(filter string) {
-	if v.originalItems == nil || len(v.originalItems) == 0 {
+	if v.state.originalItems == nil || len(v.state.originalItems) == 0 {
 		return
 	}
 
 	if filter == "" {
-		v.filteredItems = v.originalItems
-		v.updateDataTableForItems(v.originalItems)
+		v.state.filteredItems = v.state.originalItems
+		v.updateDataTableForItems(v.state.originalItems)
 		v.manager.UpdateStatusBar("Showing all items")
 		return
 	}
@@ -454,7 +899,7 @@ func (v *View) filterItems(filter string) {
 	filter = strings.ToLower(filter)
 	filtered := make([]map[string]dynamodbtypes.AttributeValue, 0)
 
-	for _, item := range v.originalItems {
+	for _, item := range v.state.originalItems {
 		matches := false
 		for _, value := range item {
 			if strings.Contains(strings.ToLower(attributeValueToString(value)), filter) {
@@ -467,40 +912,29 @@ func (v *View) filterItems(filter string) {
 		}
 	}
 
-	v.filteredItems = filtered
+	v.state.filteredItems = filtered
 	v.updateDataTableForItems(filtered)
-	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing %d of %d items", len(filtered), len(v.originalItems)))
-}
 
-func (v *View) showTableItems(tableName string) {
-	items, err := v.service.ScanTable(v.ctx, tableName)
-	if err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Error scanning table %s: %v", tableName, err))
-		return
+	filterText := filter
+	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d items",
+		v.state.currentPage,
+		v.state.totalPages,
+		len(filtered),
+		len(v.state.originalItems))
+
+	if filterText != "" {
+		statusMsg += fmt.Sprintf(" (filtered: %q)", filterText)
 	}
 
-	v.originalItems = items
-	v.filteredItems = items
-
-	if v.dataPanelFilter != "" {
-		v.filterItems(v.dataPanelFilter)
-	} else {
-		v.updateDataTableForItems(items)
+	if v.state.showRowNumbers {
+		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
 	}
-	v.manager.SetFocus(v.dataTable)
-}
 
-func (v *View) Reinitialize(cfg aws.Config) error {
-	v.service = dynamodb.NewService(cfg)
+	v.manager.UpdateStatusBar(statusMsg)
 
-	v.tableCache = make(map[string]*dynamodbtypes.TableDescription)
-	v.originalItems = nil
-	v.filteredItems = nil
-	v.leftPanel.Clear()
-	v.dataTable.Clear()
-
-	// Re-fetch data with new service
-	v.initializeTableCache()
-	v.Show()
-	return nil
+	// Ensure the dataTable is selectable and select the first row
+	if len(filtered) > 0 {
+		v.dataTable.Select(1, 0)
+		v.dataTable.SetSelectable(true, false)
+	}
 }

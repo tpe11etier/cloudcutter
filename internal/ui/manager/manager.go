@@ -448,13 +448,30 @@ func (vm *Manager) hideAllModals() {
 	vm.hideProfileSelector()
 	vm.hideHelp()
 	vm.hideJSON()
+	vm.hideRowDetails()
 }
 
 func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	currentFocus := vm.app.GetFocus()
-	if view, ok := vm.activeView.(views.View); ok {
-		if view.ActiveField() == "filterPrompt" {
-			return vm.activeView.InputHandler()(event)
+
+	if event.Key() == tcell.KeyEsc {
+		if vm.pages.HasPage(types.ModalCmdPrompt) {
+			vm.pages.RemovePage(types.ModalCmdPrompt)
+			vm.app.SetFocus(vm.activeView.Content())
+			return nil
+		}
+		if vm.pages.HasPage(types.ModalFilter) {
+			vm.HideFilterPrompt()
+			return nil
+		}
+		if vm.pages.HasPage("profileSelector") {
+			vm.hideProfileSelector()
+			return nil
+		}
+		if vm.help.IsVisible() {
+			vm.help.Hide(vm.pages)
+			vm.app.SetFocus(currentFocus)
+			return nil
 		}
 	}
 
@@ -473,9 +490,6 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		case ':':
 			vm.showCmdPrompt()
 			return nil
-		case '/':
-			vm.showFilterPrompt()
-			return nil
 		}
 		if vm.help.IsVisible() {
 			return event
@@ -491,42 +505,9 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 
-	if event.Key() == tcell.KeyEsc {
-		if !vm.IsModalVisible() && vm.activeView != nil {
-			if handler := vm.activeView.InputHandler(); handler != nil {
-				if result := handler(event); result == nil {
-					return nil
-				}
-			}
-		}
-
-		if vm.help.IsVisible() {
-			vm.help.Hide(vm.pages)
-			if vm.activeView != nil {
-				vm.app.SetFocus(currentFocus)
-			}
-			return nil
-		}
-		if vm.pages.HasPage(types.ModalCmdPrompt) {
-			vm.pages.RemovePage(types.ModalCmdPrompt)
-			if vm.activeView != nil {
-				vm.app.SetFocus(vm.activeView.Content())
-			}
-			return nil
-		}
-		if vm.pages.HasPage(types.ModalFilter) {
-			vm.HideFilterPrompt()
-			return nil
-		}
-		if vm.pages.HasPage("profileSelector") {
-			vm.hideProfileSelector()
-			return nil
-		}
-
-		return event
-	}
 	return event
 }
+
 func (vm *Manager) switchToDevProfile() error {
 	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
@@ -689,6 +670,11 @@ func (vm *Manager) hideJSON() {
 	vm.pages.RemovePage(ModalJSON)
 }
 
+func (vm *Manager) hideRowDetails() {
+	vm.pages.RemovePage(types.ModalRowDetails)
+
+}
+
 func (vm *Manager) HideAllModals() {
 	vm.hideAllModals()
 }
@@ -705,10 +691,6 @@ func (vm *Manager) startStatusListener() {
 			}
 		}
 	}()
-}
-
-func (vm *Manager) ShowFilterPrompt(modal tview.Primitive) {
-	vm.pages.AddPage(types.ModalFilter, modal, true, true)
 }
 
 func (vm *Manager) UpdateRegion(region string) error {
@@ -746,37 +728,6 @@ func (vm *Manager) CurrentProfile() string {
 	return vm.profileHandler.GetCurrentProfile()
 }
 
-func (vm *Manager) showFilterPrompt() {
-	// Store currently focused primitive before changing focus
-	previousFocus := vm.app.GetFocus()
-
-	vm.filterPrompt.SetText("")
-	vm.filterPrompt.InputField.SetLabel(" > ").SetLabelColor(tcell.ColorTeal)
-	vm.filterPrompt.SetTitle(" Filter ")
-	vm.filterPrompt.SetBorder(true)
-	vm.filterPrompt.SetTitleAlign(tview.AlignLeft)
-	vm.filterPrompt.SetBorderColor(tcell.ColorMediumTurquoise)
-
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(
-			tview.NewFlex().
-				AddItem(nil, 0, 1, false).
-				AddItem(vm.filterPrompt, 50, 0, true).
-				AddItem(nil, 0, 1, false),
-			3, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	vm.pages.AddPage(types.ModalFilter, modal, true, true)
-	vm.app.SetFocus(vm.filterPrompt.InputField)
-
-	if view, ok := vm.activeView.(interface {
-		HandleFilter(*components.Prompt, tview.Primitive)
-	}); ok {
-		view.HandleFilter(vm.filterPrompt, previousFocus)
-	}
-}
 func (vm *Manager) HideFilterPrompt() {
 	vm.pages.RemovePage(types.ModalFilter)
 	if vm.activeView != nil {
