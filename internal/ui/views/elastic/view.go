@@ -25,7 +25,7 @@ type View struct {
 	manager    *manager.Manager
 	components viewComponents
 	service    *elastic.Service
-	state      viewState
+	state      State
 	layout     tview.Primitive
 }
 
@@ -42,28 +42,49 @@ type viewComponents struct {
 	filterPrompt     *components.Prompt
 }
 
-type viewState struct {
-	activeFields      map[string]bool
-	filters           []string
-	currentIndex      string
-	matchingIndices   []string
-	currentResults    []*DocEntry
-	originalFields    []string
-	fieldListFilter   string
-	currentFilter     string
-	fieldMatches      []string
-	fieldOrder        []string
-	currentPage       int
-	pageSize          int
-	totalPages        int
-	filteredResults   []*DocEntry
-	displayedResults  []*DocEntry
-	showRowNumbers    bool
+type State struct {
+	pagination PaginationState
+	ui         UIState
+	data       DataState
+	search     SearchState
+	misc       MiscState
+}
+
+type PaginationState struct {
+	currentPage int
+	totalPages  int
+	pageSize    int
+}
+
+type UIState struct {
+	showRowNumbers  bool
+	isLoading       bool
+	fieldListFilter string
+}
+
+type DataState struct {
+	activeFields     map[string]bool
+	filters          []string
+	currentResults   []*DocEntry
+	fieldOrder       []string
+	originalFields   []string
+	fieldMatches     []string
+	filteredResults  []*DocEntry
+	displayedResults []*DocEntry
+	columnCache      map[string][]string
+	currentFilter    string
+}
+
+type SearchState struct {
+	currentIndex    string
+	matchingIndices []string
+	numResults      int
+	timeframe       string
+}
+
+type MiscState struct {
 	visibleRows       int
 	lastDisplayHeight int
-	isLoading         bool
-	columnCache       map[string][]string
-	numResults        int
 	spinner           *spinner.Spinner
 }
 
@@ -74,21 +95,43 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 		components: viewComponents{
 			filterPrompt: components.NewPrompt(),
 		},
-		state: viewState{
-			activeFields:    make(map[string]bool),
-			filters:         make([]string, 0),
-			currentIndex:    defaultIndex,
-			matchingIndices: make([]string, 0),
-			currentPage:     1,
-			pageSize:        50,
-			totalPages:      1,
-			showRowNumbers:  true,
-			visibleRows:     0,
-			columnCache:     make(map[string][]string),
-			numResults:      1000,
+		state: State{
+			pagination: PaginationState{
+				currentPage: 1,
+				pageSize:    50,
+				totalPages:  1,
+			},
+			ui: UIState{
+				showRowNumbers:  true,
+				isLoading:       false,
+				fieldListFilter: "",
+			},
+			data: DataState{
+				activeFields:     make(map[string]bool),
+				filters:          []string{},
+				currentResults:   []*DocEntry{},
+				fieldOrder:       []string{},
+				originalFields:   []string{},
+				fieldMatches:     []string{},
+				filteredResults:  []*DocEntry{},
+				displayedResults: []*DocEntry{},
+				columnCache:      make(map[string][]string),
+			},
+			search: SearchState{
+				currentIndex:    defaultIndex,
+				matchingIndices: []string{},
+				numResults:      1000,
+				timeframe:       "12h",
+			},
+			misc: MiscState{
+				visibleRows:       0,
+				lastDisplayHeight: 0,
+				spinner:           nil,
+			},
 		},
 	}
 
+	// Setup layout and initialize fields
 	v.setupLayout()
 	err := v.initFieldsSync()
 	if err != nil {
@@ -185,7 +228,7 @@ func (v *View) setupLayout() {
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
-									Text:       v.state.currentIndex,
+									Text:       v.state.search.currentIndex,
 									OnFocus: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
 									},
@@ -253,7 +296,7 @@ func (v *View) setupLayout() {
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
-									Text:       strconv.Itoa(v.state.numResults),
+									Text:       strconv.Itoa(v.state.search.numResults),
 									OnFocus: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
 									},
@@ -262,7 +305,7 @@ func (v *View) setupLayout() {
 									},
 									DoneFunc: func(s string) {
 										if num, err := strconv.Atoi(s); err == nil && num > 0 {
-											v.state.numResults = num
+											v.state.search.numResults = num
 											v.refreshResults()
 										}
 									},
@@ -483,12 +526,12 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	}
 }
 func (v *View) nextPage() {
-	if v.state.totalPages < 1 {
-		v.state.totalPages = 1
+	if v.state.pagination.totalPages < 1 {
+		v.state.pagination.totalPages = 1
 	}
 
-	if v.state.currentPage < v.state.totalPages {
-		v.state.currentPage++
+	if v.state.pagination.currentPage < v.state.pagination.totalPages {
+		v.state.pagination.currentPage++
 		v.displayCurrentPage()
 	} else {
 		v.manager.UpdateStatusBar("Already on the last page.")
@@ -496,12 +539,12 @@ func (v *View) nextPage() {
 }
 
 func (v *View) previousPage() {
-	if v.state.totalPages < 1 {
-		v.state.totalPages = 1
+	if v.state.pagination.totalPages < 1 {
+		v.state.pagination.totalPages = 1
 	}
 
-	if v.state.currentPage > 1 {
-		v.state.currentPage--
+	if v.state.pagination.currentPage > 1 {
+		v.state.pagination.currentPage--
 		v.displayCurrentPage()
 	} else {
 		v.manager.UpdateStatusBar("Already on the first page.")
@@ -552,12 +595,12 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyDelete, tcell.KeyBackspace2, tcell.KeyBackspace:
-		if len(v.state.filters) > 0 {
+		if len(v.state.data.filters) > 0 {
 			v.deleteSelectedFilter()
 		}
 		return nil
 	case tcell.KeyRune:
-		if num, err := strconv.Atoi(string(event.Rune())); err == nil && num > 0 && num <= len(v.state.filters) {
+		if num, err := strconv.Atoi(string(event.Rune())); err == nil && num > 0 && num <= len(v.state.data.filters) {
 			v.deleteFilterByIndex(num - 1)
 			return nil
 		}
@@ -570,13 +613,13 @@ func (v *View) addFilter(filter string) {
 		return
 	}
 
-	for _, existing := range v.state.filters {
+	for _, existing := range v.state.data.filters {
 		if existing == filter {
 			return
 		}
 	}
 
-	v.state.filters = append(v.state.filters, filter)
+	v.state.data.filters = append(v.state.data.filters, filter)
 	v.updateFiltersDisplay()
 	v.refreshResults()
 
@@ -584,8 +627,8 @@ func (v *View) addFilter(filter string) {
 }
 
 func (v *View) deleteFilterByIndex(index int) {
-	if index >= 0 && index < len(v.state.filters) {
-		v.state.filters = append(v.state.filters[:index], v.state.filters[index+1:]...)
+	if index >= 0 && index < len(v.state.data.filters) {
+		v.state.data.filters = append(v.state.data.filters[:index], v.state.data.filters[index+1:]...)
 		v.updateFiltersDisplay()
 		v.refreshResults()
 
@@ -595,19 +638,19 @@ func (v *View) deleteFilterByIndex(index int) {
 
 func (v *View) deleteSelectedFilter() {
 	row, _ := v.components.activeFilters.GetScrollOffset()
-	if row < len(v.state.filters) {
+	if row < len(v.state.data.filters) {
 		v.deleteFilterByIndex(row)
 	}
 }
 
 func (v *View) updateFiltersDisplay() {
-	if len(v.state.filters) == 0 {
+	if len(v.state.data.filters) == 0 {
 		v.components.activeFilters.SetText("No active filters")
 		return
 	}
 
 	var filters []string
-	for i, filter := range v.state.filters {
+	for i, filter := range v.state.data.filters {
 		filters = append(filters, fmt.Sprintf("[#fabd2f]%d:[#70cae2]%s[-]", i+1, filter))
 	}
 
@@ -619,7 +662,7 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyEnter:
 		pattern := v.components.indexView.GetText()
 		if pattern != "" {
-			v.state.currentIndex = pattern
+			v.state.search.currentIndex = pattern
 			v.refreshResults()
 		}
 		return nil
@@ -659,13 +702,13 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 				v.filterFieldList(text)
 			},
 			OnDone: func(text string) {
-				v.state.fieldListFilter = text
+				v.state.ui.fieldListFilter = text
 				v.filterFieldList(text)
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
 			},
 			OnCancel: func() {
-				v.state.fieldListFilter = ""
+				v.state.ui.fieldListFilter = ""
 				v.filterFieldList("")
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
@@ -706,10 +749,10 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 	}
 
 	// Clear old state and UI
-	v.state.currentResults = nil
-	v.state.fieldOrder = nil
-	v.state.activeFields = make(map[string]bool)
-	v.state.filters = nil
+	v.state.data.currentResults = nil
+	v.state.data.fieldOrder = nil
+	v.state.data.activeFields = make(map[string]bool)
+	v.state.data.filters = nil
 	v.components.fieldList.Clear()
 	v.components.resultsTable.Clear()
 
@@ -725,11 +768,11 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 }
 
 func (v *View) filterFieldList(filter string) {
-	v.state.currentFilter = filter
+	v.state.data.currentFilter = filter
 	v.components.fieldList.Clear()
 
 	if filter == "" {
-		v.state.fieldMatches = nil
+		v.state.data.fieldMatches = nil
 		v.rebuildFieldList()
 		v.manager.UpdateStatusBar("Showing all fields")
 		return
@@ -738,16 +781,16 @@ func (v *View) filterFieldList(filter string) {
 	filter = strings.ToLower(filter)
 	var matches []string
 
-	for _, field := range v.state.originalFields {
+	for _, field := range v.state.data.originalFields {
 		if strings.Contains(strings.ToLower(field), filter) {
 			matches = append(matches, field)
 		}
 	}
 
-	v.state.fieldMatches = matches
+	v.state.data.fieldMatches = matches
 
 	for _, field := range matches {
-		isActive := v.state.activeFields[field]
+		isActive := v.state.data.activeFields[field]
 		displayText := field
 		if isActive {
 			displayText = "[yellow]" + field + "[-]"
@@ -763,9 +806,9 @@ func (v *View) filterFieldList(filter string) {
 
 func (v *View) rebuildFieldList() {
 	v.components.fieldList.Clear()
-	for _, field := range v.state.fieldOrder {
+	for _, field := range v.state.data.fieldOrder {
 		displayText := field
-		if v.state.activeFields[field] {
+		if v.state.data.activeFields[field] {
 			displayText = "[yellow]" + field + "[-]"
 		}
 
@@ -806,7 +849,7 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 		}
 		return nil
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
-		v.state.fieldListFilter = ""
+		v.state.ui.fieldListFilter = ""
 		v.filterFieldList("")
 		return nil
 	}
@@ -821,8 +864,8 @@ func stripColorTags(text string) string {
 
 func (v *View) getActiveHeaders() []string {
 	var headers []string
-	for _, field := range v.state.fieldOrder {
-		if v.state.activeFields[field] {
+	for _, field := range v.state.data.fieldOrder {
+		if v.state.data.activeFields[field] {
 			headers = append(headers, field)
 		}
 	}
@@ -932,7 +975,7 @@ func (v *View) updateAvailableFields(results []*DocEntry) {
 
 	var addedFields []string
 	for _, field := range newFields {
-		if !contains(v.state.originalFields, field) {
+		if !contains(v.state.data.originalFields, field) {
 			addedFields = append(addedFields, field)
 		}
 	}
@@ -940,13 +983,13 @@ func (v *View) updateAvailableFields(results []*DocEntry) {
 	// Only update if we found new fields
 	if len(addedFields) > 0 {
 		// Update original fields
-		v.state.originalFields = newFields
+		v.state.data.originalFields = newFields
 
 		// Update field order while preserving existing order
 		newFieldOrder := make([]string, 0, len(newFields))
 
 		// First add existing ordered fields
-		for _, field := range v.state.fieldOrder {
+		for _, field := range v.state.data.fieldOrder {
 			if fieldSet[field] {
 				newFieldOrder = append(newFieldOrder, field)
 			}
@@ -959,7 +1002,7 @@ func (v *View) updateAvailableFields(results []*DocEntry) {
 			}
 		}
 
-		v.state.fieldOrder = newFieldOrder
+		v.state.data.fieldOrder = newFieldOrder
 
 		// Update the UI
 		v.rebuildFieldList()
@@ -972,39 +1015,39 @@ func (v *View) updateAvailableFields(results []*DocEntry) {
 
 func (v *View) updateHeader() {
 	summary := []types.SummaryItem{
-		{Key: "Index", Value: v.state.currentIndex},
-		{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.filters))},
-		{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.displayedResults))},
-		{Key: "Page", Value: fmt.Sprintf("[yellow]%d/%d[-]", v.state.currentPage, v.state.totalPages)},
+		{Key: "Index", Value: v.state.search.currentIndex},
+		{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
+		{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
+		{Key: "Page", Value: fmt.Sprintf("[yellow]%d/%d[-]", v.state.pagination.currentPage, v.state.pagination.totalPages)},
 		{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
 	}
 	v.manager.UpdateHeader(summary)
 }
 
 func (v *View) displayFilteredResults(filterText string) {
-	if v.state.currentFilter == filterText {
+	if v.state.data.currentFilter == filterText {
 		return // Avoid refiltering if filter hasn't changed
 	}
-	v.state.currentFilter = filterText
+	v.state.data.currentFilter = filterText
 
 	// Reset display state
 	if filterText == "" {
-		v.state.displayedResults = append([]*DocEntry(nil), v.state.filteredResults...)
+		v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
 	} else {
 		filterText = strings.ToLower(filterText)
-		filtered := make([]*DocEntry, 0, len(v.state.filteredResults))
+		filtered := make([]*DocEntry, 0, len(v.state.data.filteredResults))
 
-		for _, entry := range v.state.filteredResults {
+		for _, entry := range v.state.data.filteredResults {
 			if v.entryMatchesFilter(entry, filterText) {
 				filtered = append(filtered, entry)
 			}
 		}
-		v.state.displayedResults = filtered
+		v.state.data.displayedResults = filtered
 	}
 
-	v.state.currentPage = 1
-	totalResults := len(v.state.displayedResults)
-	v.state.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pageSize)))
+	v.state.pagination.currentPage = 1
+	totalResults := len(v.state.data.displayedResults)
+	v.state.pagination.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pagination.pageSize)))
 
 	// Update display
 	v.displayCurrentPage()
@@ -1032,42 +1075,42 @@ func (v *View) displayCurrentPage() {
 	}
 
 	// Calculate how many rows can be displayed based on terminal window size
-	// This updates v.state.pageSize to match visible area
+	// This updates v.state.pagination.pageSize to match visible area
 	v.calculateVisibleRows()
 
 	// Prepare headers array - if row numbers enabled, add "#" column at start
 	displayHeaders := headers
-	if v.state.showRowNumbers {
+	if v.state.ui.showRowNumbers {
 		displayHeaders = append([]string{"#"}, headers...)
 	}
 	// Set up header row with these column headers
 	v.setupResultsTableHeaders(displayHeaders)
 
-	totalResults := len(v.state.displayedResults)
+	totalResults := len(v.state.data.displayedResults)
 	if totalResults == 0 {
 		v.manager.UpdateStatusBar("No results to display.")
 		return
 	}
 
 	// Page bounds validation
-	if v.state.currentPage < 1 {
-		v.state.currentPage = 1
-	} else if v.state.currentPage > v.state.totalPages {
-		v.state.currentPage = v.state.totalPages
+	if v.state.pagination.currentPage < 1 {
+		v.state.pagination.currentPage = 1
+	} else if v.state.pagination.currentPage > v.state.pagination.totalPages {
+		v.state.pagination.currentPage = v.state.pagination.totalPages
 	}
 
 	// Calculate which slice of results to show on this page
 	// For example: on page 2 with pageSize 20:
 	// start = (2-1) * 20 = 20
 	// end = 20 + 20 = 40
-	start := (v.state.currentPage - 1) * v.state.pageSize
-	end := start + v.state.pageSize
+	start := (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
+	end := start + v.state.pagination.pageSize
 	if end > totalResults {
 		end = totalResults
 	}
 
 	// Get just the results for this page
-	pageResults := v.state.displayedResults[start:end]
+	pageResults := v.state.data.displayedResults[start:end]
 
 	// Populate table cells
 	for rowIdx, entry := range pageResults {
@@ -1076,7 +1119,7 @@ func (v *View) displayCurrentPage() {
 		currentCol := 0
 
 		// If showing row numbers, add the row number cell first
-		if v.state.showRowNumbers {
+		if v.state.ui.showRowNumbers {
 			// start+rowIdx+1 gives continuous numbering across pages
 			// e.g., page 2 starts with row 21, not 1
 			v.components.resultsTable.SetCell(currentRow, currentCol,
@@ -1103,16 +1146,16 @@ func (v *View) displayCurrentPage() {
 func (v *View) updateStatusBar(currentPageSize int) {
 	filterText := v.components.localFilterInput.GetText()
 	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d logs",
-		v.state.currentPage,
-		v.state.totalPages,
+		v.state.pagination.currentPage,
+		v.state.pagination.totalPages,
 		currentPageSize,
-		len(v.state.displayedResults))
+		len(v.state.data.displayedResults))
 
 	if filterText != "" {
 		statusMsg += fmt.Sprintf(" (filtered: %q)", filterText)
 	}
 
-	if v.state.showRowNumbers {
+	if v.state.ui.showRowNumbers {
 		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
 	}
 
@@ -1123,38 +1166,38 @@ func (v *View) calculateVisibleRows() {
 	// Get the current screen size
 	_, _, _, height := v.components.resultsTable.GetInnerRect()
 
-	if height == v.state.lastDisplayHeight {
+	if height == v.state.misc.lastDisplayHeight {
 		return // No need to recalculate if height hasn't changed
 	}
 
-	v.state.lastDisplayHeight = height
+	v.state.misc.lastDisplayHeight = height
 
 	// Subtract 1 for header row and 1 for border
-	v.state.visibleRows = height - 2
+	v.state.misc.visibleRows = height - 2
 
 	// Ensure minimum of 1 row
-	if v.state.visibleRows < 1 {
-		v.state.visibleRows = 1
+	if v.state.misc.visibleRows < 1 {
+		v.state.misc.visibleRows = 1
 	}
 
 	// Update page size to match visible rows
-	v.state.pageSize = v.state.visibleRows
+	v.state.pagination.pageSize = v.state.misc.visibleRows
 }
 
 func (v *View) toggleRowNumbers() {
-	v.state.showRowNumbers = !v.state.showRowNumbers
+	v.state.ui.showRowNumbers = !v.state.ui.showRowNumbers
 	v.displayCurrentPage() // No need for full refresh
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {
 	// Don't move unselected fields
-	if !v.state.activeFields[field] {
+	if !v.state.data.activeFields[field] {
 		return
 	}
 
 	// Find current position with early exit
 	currentPos := -1
-	for i, f := range v.state.fieldOrder {
+	for i, f := range v.state.data.fieldOrder {
 		if f == field {
 			currentPos = i
 			break
@@ -1167,8 +1210,8 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 	// Find bounds of selected fields section
 	firstSelectedPos := -1
 	lastSelectedPos := -1
-	for i, f := range v.state.fieldOrder {
-		if v.state.activeFields[f] {
+	for i, f := range v.state.data.fieldOrder {
+		if v.state.data.activeFields[f] {
 			if firstSelectedPos == -1 {
 				firstSelectedPos = i
 			}
@@ -1195,18 +1238,18 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 	selectedText = stripColorTags(selectedText)
 
 	// Do the swap
-	v.state.fieldOrder[currentPos], v.state.fieldOrder[newPos] =
-		v.state.fieldOrder[newPos], v.state.fieldOrder[currentPos]
+	v.state.data.fieldOrder[currentPos], v.state.data.fieldOrder[newPos] =
+		v.state.data.fieldOrder[newPos], v.state.data.fieldOrder[currentPos]
 
 	// Clear affected columns in cache
-	delete(v.state.columnCache, field)
-	delete(v.state.columnCache, v.state.fieldOrder[currentPos])
+	delete(v.state.data.columnCache, field)
+	delete(v.state.data.columnCache, v.state.data.fieldOrder[currentPos])
 
 	// Rebuild the field list
 	v.components.fieldList.Clear()
-	for _, f := range v.state.fieldOrder {
+	for _, f := range v.state.data.fieldOrder {
 		displayText := f
-		if v.state.activeFields[f] {
+		if v.state.data.activeFields[f] {
 			displayText = "[yellow]" + f + "[-]"
 		}
 		fieldName := f
@@ -1230,13 +1273,13 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 
 func (v *View) moveFieldInOrder(field string, isActive bool) {
 	// Early exit if fieldOrder not initialized
-	if v.state.fieldOrder == nil || len(v.state.fieldOrder) == 0 {
+	if v.state.data.fieldOrder == nil || len(v.state.data.fieldOrder) == 0 {
 		return
 	}
 
 	// Find position with early exit
 	currentPos := -1
-	for i, f := range v.state.fieldOrder {
+	for i, f := range v.state.data.fieldOrder {
 		if f == field {
 			currentPos = i
 			break
@@ -1246,34 +1289,34 @@ func (v *View) moveFieldInOrder(field string, isActive bool) {
 		return
 	}
 
-	newOrder := make([]string, 0, len(v.state.fieldOrder))
+	newOrder := make([]string, 0, len(v.state.data.fieldOrder))
 
 	if isActive {
 		newOrder = append(newOrder, field)
-		newOrder = append(newOrder, v.state.fieldOrder[:currentPos]...)
-		if currentPos+1 < len(v.state.fieldOrder) {
-			newOrder = append(newOrder, v.state.fieldOrder[currentPos+1:]...)
+		newOrder = append(newOrder, v.state.data.fieldOrder[:currentPos]...)
+		if currentPos+1 < len(v.state.data.fieldOrder) {
+			newOrder = append(newOrder, v.state.data.fieldOrder[currentPos+1:]...)
 		}
 	} else {
-		newOrder = append(newOrder, v.state.fieldOrder[:currentPos]...)
-		if currentPos+1 < len(v.state.fieldOrder) {
-			newOrder = append(newOrder, v.state.fieldOrder[currentPos+1:]...)
+		newOrder = append(newOrder, v.state.data.fieldOrder[:currentPos]...)
+		if currentPos+1 < len(v.state.data.fieldOrder) {
+			newOrder = append(newOrder, v.state.data.fieldOrder[currentPos+1:]...)
 		}
 		newOrder = append(newOrder, field)
 	}
 
 	// Clear only necessary cache entries
-	delete(v.state.columnCache, field)
+	delete(v.state.data.columnCache, field)
 
-	v.state.fieldOrder = newOrder
+	v.state.data.fieldOrder = newOrder
 }
 
 func (v *View) toggleField(field string) {
-	v.state.activeFields[field] = !v.state.activeFields[field]
-	v.moveFieldInOrder(field, v.state.activeFields[field])
+	v.state.data.activeFields[field] = !v.state.data.activeFields[field]
+	v.moveFieldInOrder(field, v.state.data.activeFields[field])
 
-	if v.state.currentFilter != "" {
-		v.filterFieldList(v.state.currentFilter)
+	if v.state.data.currentFilter != "" {
+		v.filterFieldList(v.state.data.currentFilter)
 	} else {
 		v.rebuildFieldList()
 	}
@@ -1284,27 +1327,27 @@ func (v *View) toggleField(field string) {
 }
 
 func (v *View) showLoading(message string) {
-	if v.state.spinner == nil {
-		v.state.spinner = spinner.NewSpinner(message)
-		v.state.spinner.SetOnComplete(func() {
+	if v.state.misc.spinner == nil {
+		v.state.misc.spinner = spinner.NewSpinner(message)
+		v.state.misc.spinner.SetOnComplete(func() {
 			pages := v.manager.Pages()
 			pages.RemovePage("loading")
 		})
 	} else {
-		v.state.spinner.SetMessage(message)
+		v.state.misc.spinner.SetMessage(message)
 	}
 
-	if !v.state.spinner.IsLoading() {
-		modal := spinner.CreateSpinnerModal(v.state.spinner)
+	if !v.state.misc.spinner.IsLoading() {
+		modal := spinner.CreateSpinnerModal(v.state.misc.spinner)
 		pages := v.manager.Pages()
 		pages.AddPage("loading", modal, true, true)
-		v.state.spinner.Start(v.manager.App())
+		v.state.misc.spinner.Start(v.manager.App())
 	}
 }
 
 func (v *View) hideLoading() {
-	if v.state.spinner != nil {
-		v.state.spinner.Stop()
+	if v.state.misc.spinner != nil {
+		v.state.misc.spinner.Stop()
 	}
 }
 
@@ -1347,13 +1390,13 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 				v.filterFieldList(text)
 			},
 			OnDone: func(text string) {
-				v.state.fieldListFilter = text
+				v.state.ui.fieldListFilter = text
 				v.filterFieldList(text)
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
 			},
 			OnCancel: func() {
-				v.state.fieldListFilter = ""
+				v.state.ui.fieldListFilter = ""
 				v.filterFieldList("")
 				v.manager.HideFilterPrompt()
 				v.manager.SetFocus(previousFocus)
@@ -1407,17 +1450,17 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 }
 
 func (v *View) refreshResults() {
-	if v.state.isLoading {
+	if v.state.ui.isLoading {
 		return
 	}
 
 	currentFocus := v.manager.App().GetFocus()
 	v.showLoading("Refreshing results")
-	v.state.isLoading = true
+	v.state.ui.isLoading = true
 
 	go func() {
 		defer func() {
-			v.state.isLoading = false
+			v.state.ui.isLoading = false
 			v.hideLoading()
 			v.manager.App().QueueUpdateDraw(func() {
 				v.manager.App().SetFocus(currentFocus)
@@ -1429,7 +1472,7 @@ func (v *View) refreshResults() {
 		var totalHits int
 
 		// Use scroll API if we expect more than 10k results
-		if v.state.numResults > 10000 {
+		if v.state.search.numResults > 10000 {
 			results, err = v.fetchLargeResultSet()
 			if err != nil {
 				v.manager.App().QueueUpdateDraw(func() {
@@ -1440,7 +1483,7 @@ func (v *View) refreshResults() {
 			totalHits = len(results)
 		} else {
 			query := v.buildQuery()
-			query["size"] = v.state.numResults
+			query["size"] = v.state.search.numResults
 
 			result, err := v.executeSearch(query)
 			if err != nil {
@@ -1463,12 +1506,12 @@ func (v *View) refreshResults() {
 		v.manager.App().QueueUpdateDraw(func() {
 			v.updateAvailableFields(results)
 
-			v.state.filteredResults = results
-			v.state.displayedResults = append([]*DocEntry(nil), results...)
+			v.state.data.filteredResults = results
+			v.state.data.displayedResults = append([]*DocEntry(nil), results...)
 
-			v.state.totalPages = int(math.Ceil(float64(len(results)) / float64(v.state.pageSize)))
-			if v.state.totalPages < 1 {
-				v.state.totalPages = 1
+			v.state.pagination.totalPages = int(math.Ceil(float64(len(results)) / float64(v.state.pagination.pageSize)))
+			if v.state.pagination.totalPages < 1 {
+				v.state.pagination.totalPages = 1
 			}
 
 			v.displayCurrentPage()
@@ -1502,13 +1545,13 @@ func (v *View) processSearchResults(hits []types.ESSearchHit) ([]*DocEntry, erro
 }
 
 func (v *View) updateResultsState(results []*DocEntry) {
-	v.state.filteredResults = results
-	v.state.displayedResults = append([]*DocEntry(nil), results...)
+	v.state.data.filteredResults = results
+	v.state.data.displayedResults = append([]*DocEntry(nil), results...)
 
 	totalResults := len(results)
-	v.state.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pageSize)))
-	if v.state.totalPages < 1 {
-		v.state.totalPages = 1
+	v.state.pagination.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pagination.pageSize)))
+	if v.state.pagination.totalPages < 1 {
+		v.state.pagination.totalPages = 1
 	}
 }
 
@@ -1519,7 +1562,7 @@ func (v *View) executeSearch(query map[string]any) (*types.ESSearchResult, error
 	}
 
 	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(v.state.currentIndex),
+		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
 		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
 	)
 	if err != nil {
@@ -1566,7 +1609,7 @@ func (v *View) updateFieldList(fields []string) {
 
 func (v *View) initFieldsSync() error {
 	query := map[string]any{
-		"size": v.state.pageSize,
+		"size": v.state.pagination.pageSize,
 		"sort": []map[string]any{
 			{
 				"unixTime": map[string]any{
@@ -1588,17 +1631,17 @@ func (v *View) initFieldsSync() error {
 	}
 
 	// Update state
-	v.state.currentResults = entries
+	v.state.data.currentResults = entries
 	fields := v.getEntryFields(entries)
 
-	v.state.originalFields = fields
-	v.state.fieldOrder = make([]string, len(fields))
-	copy(v.state.fieldOrder, fields)
+	v.state.data.originalFields = fields
+	v.state.data.fieldOrder = make([]string, len(fields))
+	copy(v.state.data.fieldOrder, fields)
 
-	v.state.filteredResults = append([]*DocEntry(nil), entries...)
-	v.state.displayedResults = append([]*DocEntry(nil), v.state.filteredResults...)
+	v.state.data.filteredResults = append([]*DocEntry(nil), entries...)
+	v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
 
-	v.updateFieldList(v.state.fieldOrder)
+	v.updateFieldList(v.state.data.fieldOrder)
 	v.updateResultsState(entries)
 	v.displayCurrentPage()
 
@@ -1620,7 +1663,7 @@ func (v *View) fetchLargeResultSet() ([]*DocEntry, error) {
 
 	// Initial scroll request
 	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(v.state.currentIndex),
+		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
 		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
 		v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
 	)
@@ -1670,8 +1713,8 @@ func (v *View) buildQuery() map[string]any {
 	}
 
 	timeframe := v.components.timeframeInput.GetText()
-	if timeframe != "" || len(v.state.filters) > 0 {
-		must := make([]any, 0, len(v.state.filters)+1)
+	if timeframe != "" || len(v.state.data.filters) > 0 {
+		must := make([]any, 0, len(v.state.data.filters)+1)
 
 		if timeframe != "" {
 			must = append(must, map[string]any{
@@ -1684,7 +1727,7 @@ func (v *View) buildQuery() map[string]any {
 			})
 		}
 
-		for _, filter := range v.state.filters {
+		for _, filter := range v.state.data.filters {
 			parts := strings.SplitN(filter, ":", 2)
 			if len(parts) != 2 {
 				parts = strings.SplitN(filter, "=", 2)
@@ -1738,8 +1781,8 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEnter:
 		row, _ := v.components.resultsTable.GetSelection()
-		if row > 0 && row <= len(v.state.displayedResults) {
-			entry := v.state.displayedResults[row-1]
+		if row > 0 && row <= len(v.state.data.displayedResults) {
+			entry := v.state.data.displayedResults[row-1]
 
 			// Do a new query without source filtering to get the complete document
 			res, err := v.service.Client.Get(
