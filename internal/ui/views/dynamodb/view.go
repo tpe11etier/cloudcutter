@@ -430,25 +430,28 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 }
 
 func (v *View) filterLeftPanel(filter string) {
-	if filter == "" {
-		v.leftPanel.Clear()
-		for tableName := range v.state.tableCache {
-			v.leftPanel.AddItem(tableName, "", 0, nil)
-		}
-		v.manager.UpdateStatusBar("Showing all tables")
-		return
-	}
+	tableNames := make([]string, 0, len(v.state.tableCache))
 
 	filter = strings.ToLower(filter)
-	v.leftPanel.Clear()
 
 	for tableName := range v.state.tableCache {
-		if strings.Contains(strings.ToLower(tableName), filter) {
-			v.leftPanel.AddItem(tableName, "", 0, nil)
+		if filter == "" || strings.Contains(strings.ToLower(tableName), filter) {
+			tableNames = append(tableNames, tableName)
 		}
 	}
 
-	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing tables matching '%s'", filter))
+	sort.Strings(tableNames)
+
+	v.leftPanel.Clear()
+	for _, tableName := range tableNames {
+		v.leftPanel.AddItem(tableName, "", 0, nil)
+	}
+
+	if filter == "" {
+		v.manager.UpdateStatusBar("Showing all tables")
+	} else {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing tables matching '%s'", filter))
+	}
 }
 
 func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {

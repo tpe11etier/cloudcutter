@@ -1834,29 +1834,24 @@ func (v *View) toggleFieldList() {
 	v.state.ui.fieldListVisible = !v.state.ui.fieldListVisible
 	v.updateResultsLayout()
 
-	// Update focus if needed
 	if !v.state.ui.fieldListVisible && v.manager.App().GetFocus() == v.components.fieldList {
 		v.manager.App().SetFocus(v.components.resultsTable)
 	}
 }
 
 func (v *View) updateResultsLayout() {
-	// Grab the sub-flex that actually holds the field list & table columns
 	resultsFlex := v.components.resultsFlex
 	if resultsFlex == nil {
 		return
 	}
 
-	// Remove both items from the results flex only
 	resultsFlex.RemoveItem(v.components.fieldList)
 	resultsFlex.RemoveItem(v.components.resultsTable)
 
 	if v.state.ui.fieldListVisible {
-		// Show both columns: field list (fixed width) + results
 		resultsFlex.AddItem(v.components.fieldList, 50, 0, false).
 			AddItem(v.components.resultsTable, 0, 1, true)
 	} else {
-		// Only show the results table, spanning all available space
 		resultsFlex.AddItem(v.components.resultsTable, 0, 1, true)
 	}
 }
