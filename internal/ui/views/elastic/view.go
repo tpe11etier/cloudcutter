@@ -40,7 +40,7 @@ type viewComponents struct {
 	timeframeInput   *tview.InputField
 	numResultsInput  *tview.InputField
 	filterPrompt     *components.Prompt
-	resultsContainer *tview.Flex
+	resultsFlex      *tview.Flex
 }
 
 type State struct {
@@ -58,9 +58,10 @@ type PaginationState struct {
 }
 
 type UIState struct {
-	showRowNumbers  bool
-	isLoading       bool
-	fieldListFilter string
+	showRowNumbers   bool
+	isLoading        bool
+	fieldListFilter  string
+	fieldListVisible bool
 }
 
 type DataState struct {
@@ -349,6 +350,7 @@ func (v *View) setupLayout() {
 			},
 			// Results Section
 			{
+				ID:         "resultsFlex",
 				Type:       types.ComponentFlex,
 				Direction:  tview.FlexColumn,
 				Proportion: 1,
@@ -411,11 +413,12 @@ func (v *View) setupLayout() {
 	v.components.filterInput = v.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	v.components.activeFilters = v.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
 	v.components.indexView = v.manager.GetPrimitiveByID("indexView").(*tview.InputField)
-	v.components.fieldList = v.manager.GetPrimitiveByID("fieldList").(*tview.List)
-	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 	v.components.localFilterInput = v.manager.GetPrimitiveByID("localFilterInput").(*tview.InputField)
 	v.components.timeframeInput = v.manager.GetPrimitiveByID("timeframeInput").(*tview.InputField)
 	v.components.numResultsInput = v.manager.GetPrimitiveByID("numResultsInput").(*tview.InputField)
+	v.components.resultsFlex = v.manager.GetPrimitiveByID("resultsFlex").(*tview.Flex)
+	v.components.fieldList = v.manager.GetPrimitiveByID("fieldList").(*tview.List)
+	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 
 	v.components.localFilterInput.SetChangedFunc(func(text string) {
 		v.displayFilteredResults(text)
@@ -423,7 +426,6 @@ func (v *View) setupLayout() {
 
 	v.initFieldsSync()
 }
-
 func (v *View) Name() string {
 	return "elastic"
 }
@@ -1074,7 +1076,9 @@ func (v *View) entryMatchesFilter(entry *DocEntry, filterText string) bool {
 }
 
 func (v *View) displayCurrentPage() {
-	// Clear existing table content
+
+	oldRowOffset, oldColOffset := v.components.resultsTable.GetOffset()
+
 	v.components.resultsTable.Clear()
 
 	// Get headers from active/selected fields
@@ -1135,7 +1139,7 @@ func (v *View) displayCurrentPage() {
 			currentCol++
 		}
 	}
-
+	v.components.resultsTable.SetOffset(oldRowOffset, oldColOffset)
 	v.updateStatusBar(len(pageResults))
 }
 
@@ -1824,4 +1828,35 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	}
 	return event
+}
+
+func (v *View) toggleFieldList() {
+	v.state.ui.fieldListVisible = !v.state.ui.fieldListVisible
+	v.updateResultsLayout()
+
+	// Update focus if needed
+	if !v.state.ui.fieldListVisible && v.manager.App().GetFocus() == v.components.fieldList {
+		v.manager.App().SetFocus(v.components.resultsTable)
+	}
+}
+
+func (v *View) updateResultsLayout() {
+	// Grab the sub-flex that actually holds the field list & table columns
+	resultsFlex := v.components.resultsFlex
+	if resultsFlex == nil {
+		return
+	}
+
+	// Remove both items from the results flex only
+	resultsFlex.RemoveItem(v.components.fieldList)
+	resultsFlex.RemoveItem(v.components.resultsTable)
+
+	if v.state.ui.fieldListVisible {
+		// Show both columns: field list (fixed width) + results
+		resultsFlex.AddItem(v.components.fieldList, 50, 0, false).
+			AddItem(v.components.resultsTable, 0, 1, true)
+	} else {
+		// Only show the results table, spanning all available space
+		resultsFlex.AddItem(v.components.resultsTable, 0, 1, true)
+	}
 }
