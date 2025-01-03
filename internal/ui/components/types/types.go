@@ -143,6 +143,7 @@ type Component struct {
 	Children   []Component
 	Help       []help.Command
 	HelpProps  *help.HelpProperties
+	OnCreate   func(p tview.Primitive)
 }
 
 type ESSearchHit struct {

@@ -40,6 +40,7 @@ type viewComponents struct {
 	timeframeInput   *tview.InputField
 	numResultsInput  *tview.InputField
 	filterPrompt     *components.Prompt
+	resultsContainer *tview.Flex
 }
 
 type State struct {
@@ -873,9 +874,18 @@ func (v *View) getActiveHeaders() []string {
 }
 
 func (v *View) setupResultsTableHeaders(headers []string) {
-	v.components.resultsTable.SetFixed(1, 0)
+	table := v.components.resultsTable
+	table.Clear()
+	table.SetSelectable(true, false)
+
+	if v.state.ui.showRowNumbers {
+		table.SetFixed(1, 1)
+	} else {
+		table.SetFixed(1, 0)
+	}
+
 	for col, header := range headers {
-		v.components.resultsTable.SetCell(0, col,
+		table.SetCell(0, col,
 			tview.NewTableCell(header).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignCenter).
@@ -1075,7 +1085,6 @@ func (v *View) displayCurrentPage() {
 	}
 
 	// Calculate how many rows can be displayed based on terminal window size
-	// This updates v.state.pagination.pageSize to match visible area
 	v.calculateVisibleRows()
 
 	// Prepare headers array - if row numbers enabled, add "#" column at start
@@ -1083,6 +1092,7 @@ func (v *View) displayCurrentPage() {
 	if v.state.ui.showRowNumbers {
 		displayHeaders = append([]string{"#"}, headers...)
 	}
+
 	// Set up header row with these column headers
 	v.setupResultsTableHeaders(displayHeaders)
 
@@ -1092,17 +1102,7 @@ func (v *View) displayCurrentPage() {
 		return
 	}
 
-	// Page bounds validation
-	if v.state.pagination.currentPage < 1 {
-		v.state.pagination.currentPage = 1
-	} else if v.state.pagination.currentPage > v.state.pagination.totalPages {
-		v.state.pagination.currentPage = v.state.pagination.totalPages
-	}
-
 	// Calculate which slice of results to show on this page
-	// For example: on page 2 with pageSize 20:
-	// start = (2-1) * 20 = 20
-	// end = 20 + 20 = 40
 	start := (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
 	end := start + v.state.pagination.pageSize
 	if end > totalResults {
@@ -1114,19 +1114,15 @@ func (v *View) displayCurrentPage() {
 
 	// Populate table cells
 	for rowIdx, entry := range pageResults {
-		// currentRow starts at 1 because row 0 is headers
 		currentRow := rowIdx + 1
 		currentCol := 0
 
 		// If showing row numbers, add the row number cell first
 		if v.state.ui.showRowNumbers {
-			// start+rowIdx+1 gives continuous numbering across pages
-			// e.g., page 2 starts with row 21, not 1
 			v.components.resultsTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
 					SetTextColor(tcell.ColorGray).
-					SetAlign(tview.AlignRight).
-					SetSelectable(false))
+					SetAlign(tview.AlignRight))
 			currentCol++
 		}
 
@@ -1135,14 +1131,14 @@ func (v *View) displayCurrentPage() {
 			v.components.resultsTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(value).
 					SetTextColor(tcell.ColorBeige).
-					SetAlign(tview.AlignLeft).
-					SetSelectable(true))
+					SetAlign(tview.AlignLeft))
 			currentCol++
 		}
 	}
 
 	v.updateStatusBar(len(pageResults))
 }
+
 func (v *View) updateStatusBar(currentPageSize int) {
 	filterText := v.components.localFilterInput.GetText()
 	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d logs",
@@ -1779,33 +1775,51 @@ func (v *View) buildQuery() map[string]any {
 
 func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
+	case tcell.KeyRune:
+		switch event.Rune() {
+		case 'f':
+			v.toggleFieldList()
+			return nil
+		}
 	case tcell.KeyEnter:
 		row, _ := v.components.resultsTable.GetSelection()
 		if row > 0 && row <= len(v.state.data.displayedResults) {
 			entry := v.state.data.displayedResults[row-1]
 
-			// Do a new query without source filtering to get the complete document
-			res, err := v.service.Client.Get(
-				entry.Index,
-				entry.ID,
-			)
-			if err != nil {
-				v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching document: %v", err))
-				return nil
-			}
-			defer res.Body.Close()
+			v.showLoading("Fetching document...")
 
-			var fullDoc struct {
-				Source map[string]any `json:"_source"`
-			}
-			if err := json.NewDecoder(res.Body).Decode(&fullDoc); err != nil {
-				v.manager.UpdateStatusBar(fmt.Sprintf("Error decoding document: %v", err))
-				return nil
-			}
+			go func() {
+				defer v.hideLoading()
 
-			// display full doc
-			entry.data = fullDoc.Source
-			v.showJSONModal(entry)
+				// Do a new query without source filtering to get the complete document
+				res, err := v.service.Client.Get(
+					entry.Index,
+					entry.ID,
+				)
+				if err != nil {
+					v.manager.App().QueueUpdateDraw(func() {
+						v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching document: %v", err))
+					})
+					return
+				}
+				defer res.Body.Close()
+
+				var fullDoc struct {
+					Source map[string]any `json:"_source"`
+				}
+				if err := json.NewDecoder(res.Body).Decode(&fullDoc); err != nil {
+					v.manager.App().QueueUpdateDraw(func() {
+						v.manager.UpdateStatusBar(fmt.Sprintf("Error decoding document: %v", err))
+					})
+					return
+				}
+
+				// Display full doc
+				entry.data = fullDoc.Source
+				v.manager.App().QueueUpdateDraw(func() {
+					v.showJSONModal(entry)
+				})
+			}()
 		}
 		return nil
 	}
