@@ -35,12 +35,14 @@ type viewComponents struct {
 	activeFilters    *tview.TextView
 	indexView        *tview.InputField
 	fieldList        *tview.List
+	selectedList     *tview.List
 	resultsTable     *tview.Table
 	localFilterInput *tview.InputField
 	timeframeInput   *tview.InputField
 	numResultsInput  *tview.InputField
 	filterPrompt     *components.Prompt
 	resultsFlex      *tview.Flex
+	listsContainer   *tview.Flex
 }
 
 type State struct {
@@ -350,36 +352,67 @@ func (v *View) setupLayout() {
 			},
 			// Results Section
 			{
-				ID:         "resultsFlex",
-				Type:       types.ComponentFlex,
-				Direction:  tview.FlexColumn,
-				Proportion: 1,
+				ID:        "resultsFlex",
+				Type:      types.ComponentFlex,
+				Direction: tview.FlexColumn,
+				FixedSize: 50,
 				Children: []types.Component{
-					// Field List
+					// Left side - Fields lists
 					{
-						ID:        "fieldList",
-						Type:      types.ComponentList,
+						ID:        "listsContainer",
+						Type:      types.ComponentFlex,
+						Direction: tview.FlexRow,
 						FixedSize: 50,
-						Style: types.ListStyle{
-							BaseStyle: types.BaseStyle{
-								Border:      true,
-								BorderColor: tcell.ColorBeige,
-								Title:       "Available Fields (j ↓ / k ↑ to sort)",
-								TitleColor:  tcell.ColorYellow,
+						Children: []types.Component{
+							{
+								ID:         "fieldList",
+								Type:       types.ComponentList,
+								Proportion: 1,
+								Style: types.ListStyle{
+									BaseStyle: types.BaseStyle{
+										Border:      true,
+										BorderColor: tcell.ColorBeige,
+										Title:       "Available Fields (Enter to select)",
+										TitleColor:  tcell.ColorYellow,
+									},
+									SelectedTextColor:       tcell.ColorBeige,
+									SelectedBackgroundColor: tcell.ColorDarkCyan,
+								},
+								Properties: types.ListProperties{
+									OnFocus: func(list *tview.List) {
+										list.SetBorderColor(tcell.ColorMediumTurquoise)
+									},
+									OnBlur: func(list *tview.List) {
+										list.SetBorderColor(tcell.ColorBeige)
+									},
+								},
 							},
-							SelectedTextColor:       tcell.ColorBeige,
-							SelectedBackgroundColor: tcell.ColorDarkCyan,
-						},
-						Properties: types.ListProperties{
-							OnFocus: func(list *tview.List) {
-								list.SetBorderColor(tcell.ColorMediumTurquoise)
-							},
-							OnBlur: func(list *tview.List) {
-								list.SetBorderColor(tcell.ColorBeige)
+							{
+								ID:         "selectedList",
+								Type:       types.ComponentList,
+								Proportion: 1,
+								Style: types.ListStyle{
+									BaseStyle: types.BaseStyle{
+										Border:      true,
+										BorderColor: tcell.ColorBeige,
+										Title:       "Selected Fields (j/k to move)",
+										TitleColor:  tcell.ColorYellow,
+									},
+									SelectedTextColor:       tcell.ColorBeige,
+									SelectedBackgroundColor: tcell.ColorDarkCyan,
+								},
+								Properties: types.ListProperties{
+									OnFocus: func(list *tview.List) {
+										list.SetBorderColor(tcell.ColorMediumTurquoise)
+									},
+									OnBlur: func(list *tview.List) {
+										list.SetBorderColor(tcell.ColorBeige)
+									},
+								},
 							},
 						},
 					},
-					// Results Table
+					// Right side - Results table
 					{
 						ID:         "resultsTable",
 						Type:       types.ComponentTable,
@@ -418,14 +451,16 @@ func (v *View) setupLayout() {
 	v.components.numResultsInput = v.manager.GetPrimitiveByID("numResultsInput").(*tview.InputField)
 	v.components.resultsFlex = v.manager.GetPrimitiveByID("resultsFlex").(*tview.Flex)
 	v.components.fieldList = v.manager.GetPrimitiveByID("fieldList").(*tview.List)
+	v.components.selectedList = v.manager.GetPrimitiveByID("selectedList").(*tview.List)
 	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
+	v.components.listsContainer = v.manager.GetPrimitiveByID("listsContainer").(*tview.Flex)
 
 	v.components.localFilterInput.SetChangedFunc(func(text string) {
 		v.displayFilteredResults(text)
 	})
 
-	v.initFieldsSync()
 }
+
 func (v *View) Name() string {
 	return "elastic"
 }
@@ -517,6 +552,8 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			return v.handleIndexInput(event)
 		case v.components.fieldList:
 			return v.handleFieldList(event)
+		case v.components.selectedList:
+			return v.handleSelectedList(event)
 		case v.components.timeframeInput:
 			return event
 		case v.components.resultsTable:
@@ -570,8 +607,9 @@ func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 	case v.components.localFilterInput:
 		v.manager.App().SetFocus(v.components.fieldList)
 	case v.components.fieldList:
+		v.manager.App().SetFocus(v.components.selectedList)
+	case v.components.selectedList:
 		v.manager.App().SetFocus(v.components.resultsTable)
-
 	case v.components.resultsTable:
 		v.manager.App().SetFocus(v.components.filterInput)
 	default:
@@ -793,11 +831,7 @@ func (v *View) filterFieldList(filter string) {
 	v.state.data.fieldMatches = matches
 
 	for _, field := range matches {
-		isActive := v.state.data.activeFields[field]
 		displayText := field
-		if isActive {
-			displayText = "[yellow]" + field + "[-]"
-		}
 		fieldName := field
 		v.components.fieldList.AddItem(displayText, "", 0, func() {
 			v.toggleField(fieldName)
@@ -807,48 +841,14 @@ func (v *View) filterFieldList(filter string) {
 	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing fields matching '%s' (%d matches)", filter, len(matches)))
 }
 
-func (v *View) rebuildFieldList() {
-	v.components.fieldList.Clear()
-	for _, field := range v.state.data.fieldOrder {
-		displayText := field
-		if v.state.data.activeFields[field] {
-			displayText = "[yellow]" + field + "[-]"
-		}
-
-		fieldName := field
-		v.components.fieldList.AddItem(displayText, "", 0, func() {
-			v.toggleField(fieldName)
-		})
-	}
-}
-
 func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'k': // Move up
-			index := v.components.fieldList.GetCurrentItem()
-			if index >= 0 {
-				mainText, _ := v.components.fieldList.GetItemText(index)
-				field := stripColorTags(mainText)
-				v.moveFieldPosition(field, true)
-			}
-			return nil
-		case 'j': // Move down
-			index := v.components.fieldList.GetCurrentItem()
-			if index >= 0 {
-				mainText, _ := v.components.fieldList.GetItemText(index)
-				field := stripColorTags(mainText)
-				v.moveFieldPosition(field, false)
-			}
-			return nil
-		}
 	case tcell.KeyEnter:
+		// Field list only handles activation
 		index := v.components.fieldList.GetCurrentItem()
 		if index >= 0 {
 			mainText, _ := v.components.fieldList.GetItemText(index)
-			field := stripColorTags(mainText)
-			v.toggleField(field)
+			v.toggleField(mainText)
 		}
 		return nil
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
@@ -859,20 +859,36 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 	return event
 }
 
-func stripColorTags(text string) string {
-	text = strings.TrimPrefix(text, "[yellow]")
-	text = strings.TrimSuffix(text, "[-]")
-	return strings.TrimSpace(text)
-}
-
-func (v *View) getActiveHeaders() []string {
-	var headers []string
-	for _, field := range v.state.data.fieldOrder {
-		if v.state.data.activeFields[field] {
-			headers = append(headers, field)
+// Add new handler for selected list
+func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyRune:
+		switch event.Rune() {
+		case 'k': // Move up
+			index := v.components.selectedList.GetCurrentItem()
+			if index >= 0 {
+				mainText, _ := v.components.selectedList.GetItemText(index)
+				v.moveFieldPosition(mainText, true)
+			}
+			return nil
+		case 'j': // Move down
+			index := v.components.selectedList.GetCurrentItem()
+			if index >= 0 {
+				mainText, _ := v.components.selectedList.GetItemText(index)
+				v.moveFieldPosition(mainText, false)
+			}
+			return nil
 		}
+	case tcell.KeyEnter:
+		// Selected list only handles deactivation
+		index := v.components.selectedList.GetCurrentItem()
+		if index >= 0 {
+			mainText, _ := v.components.selectedList.GetItemText(index)
+			v.toggleField(mainText) // Deactivate when Enter pressed in selected list
+		}
+		return nil
 	}
-	return headers
+	return event
 }
 
 func (v *View) setupResultsTableHeaders(headers []string) {
@@ -1190,14 +1206,16 @@ func (v *View) toggleRowNumbers() {
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {
-	// Don't move unselected fields
-	if !v.state.data.activeFields[field] {
-		return
+	// Get current list of fields in selected list
+	var selectedFields []string
+	for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
+		text, _ := v.components.selectedList.GetItemText(i)
+		selectedFields = append(selectedFields, text)
 	}
 
-	// Find current position with early exit
+	// Find current position
 	currentPos := -1
-	for i, f := range v.state.data.fieldOrder {
+	for i, f := range selectedFields {
 		if f == field {
 			currentPos = i
 			break
@@ -1207,23 +1225,11 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 		return
 	}
 
-	// Find bounds of selected fields section
-	firstSelectedPos := -1
-	lastSelectedPos := -1
-	for i, f := range v.state.data.fieldOrder {
-		if v.state.data.activeFields[f] {
-			if firstSelectedPos == -1 {
-				firstSelectedPos = i
-			}
-			lastSelectedPos = i
-		}
-	}
-
-	// Calculate new position within selected fields bounds
+	// Calculate new position
 	newPos := currentPos
-	if moveUp && currentPos > firstSelectedPos {
+	if moveUp && currentPos > 0 {
 		newPos = currentPos - 1
-	} else if !moveUp && currentPos < lastSelectedPos {
+	} else if !moveUp && currentPos < len(selectedFields)-1 {
 		newPos = currentPos + 1
 	}
 
@@ -1232,45 +1238,24 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 		return
 	}
 
-	// Keep current selection
-	selectedIndex := v.components.fieldList.GetCurrentItem()
-	selectedText, _ := v.components.fieldList.GetItemText(selectedIndex)
-	selectedText = stripColorTags(selectedText)
-
 	// Do the swap
-	v.state.data.fieldOrder[currentPos], v.state.data.fieldOrder[newPos] =
-		v.state.data.fieldOrder[newPos], v.state.data.fieldOrder[currentPos]
+	selectedFields[currentPos], selectedFields[newPos] = selectedFields[newPos], selectedFields[currentPos]
 
-	// Clear affected columns in cache
-	delete(v.state.data.columnCache, field)
-	delete(v.state.data.columnCache, v.state.data.fieldOrder[currentPos])
-
-	// Rebuild the field list
-	v.components.fieldList.Clear()
-	for _, f := range v.state.data.fieldOrder {
-		displayText := f
-		if v.state.data.activeFields[f] {
-			displayText = "[yellow]" + f + "[-]"
-		}
-		fieldName := f
-		v.components.fieldList.AddItem(displayText, "", 0, func() {
-			v.toggleField(fieldName)
+	// Rebuild just the selected list
+	v.components.selectedList.Clear()
+	for _, f := range selectedFields {
+		field := f // Capture for closure
+		v.components.selectedList.AddItem(field, "", 0, func() {
+			v.toggleField(field)
 		})
 	}
 
-	// Restore selection
-	for i := 0; i < v.components.fieldList.GetItemCount(); i++ {
-		txt, _ := v.components.fieldList.GetItemText(i)
-		if stripColorTags(txt) == selectedText {
-			v.components.fieldList.SetCurrentItem(i)
-			break
-		}
-	}
+	// Set focus back to the moved item
+	v.components.selectedList.SetCurrentItem(newPos)
 
-	// Refresh the results table
+	// Refresh the results table since order changed
 	v.displayCurrentPage()
 }
-
 func (v *View) moveFieldInOrder(field string, isActive bool) {
 	// Early exit if fieldOrder not initialized
 	if v.state.data.fieldOrder == nil || len(v.state.data.fieldOrder) == 0 {
@@ -1309,21 +1294,6 @@ func (v *View) moveFieldInOrder(field string, isActive bool) {
 	delete(v.state.data.columnCache, field)
 
 	v.state.data.fieldOrder = newOrder
-}
-
-func (v *View) toggleField(field string) {
-	v.state.data.activeFields[field] = !v.state.data.activeFields[field]
-	v.moveFieldInOrder(field, v.state.data.activeFields[field])
-
-	if v.state.data.currentFilter != "" {
-		v.filterFieldList(v.state.data.currentFilter)
-	} else {
-		v.rebuildFieldList()
-	}
-
-	go func() {
-		v.refreshResults()
-	}()
 }
 
 func (v *View) showLoading(message string) {
@@ -1795,7 +1765,7 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 			go func() {
 				defer v.hideLoading()
 
-				// Do a new query without source filtering to get the complete document
+				// Query without source filtering to get the complete document
 				res, err := v.service.Client.Get(
 					entry.Index,
 					entry.ID,
@@ -1834,7 +1804,7 @@ func (v *View) toggleFieldList() {
 	v.state.ui.fieldListVisible = !v.state.ui.fieldListVisible
 	v.updateResultsLayout()
 
-	if !v.state.ui.fieldListVisible && v.manager.App().GetFocus() == v.components.fieldList {
+	if !v.state.ui.fieldListVisible {
 		v.manager.App().SetFocus(v.components.resultsTable)
 	}
 }
@@ -1845,13 +1815,67 @@ func (v *View) updateResultsLayout() {
 		return
 	}
 
-	resultsFlex.RemoveItem(v.components.fieldList)
+	resultsFlex.RemoveItem(v.components.listsContainer)
 	resultsFlex.RemoveItem(v.components.resultsTable)
 
 	if v.state.ui.fieldListVisible {
-		resultsFlex.AddItem(v.components.fieldList, 50, 0, false).
+		resultsFlex.AddItem(v.components.listsContainer, 50, 0, false).
 			AddItem(v.components.resultsTable, 0, 1, true)
 	} else {
 		resultsFlex.AddItem(v.components.resultsTable, 0, 1, true)
 	}
+}
+
+func (v *View) getActiveHeaders() []string {
+	// Instead of using fieldOrder, get order from selected list
+	var headers []string
+	for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
+		text, _ := v.components.selectedList.GetItemText(i)
+		headers = append(headers, text)
+	}
+	return headers
+}
+
+func (v *View) rebuildFieldList() {
+	v.components.fieldList.Clear()
+	for _, field := range v.state.data.fieldOrder {
+		if !v.state.data.activeFields[field] { // Only show non-selected fields
+			v.components.fieldList.AddItem(field, "", 0, func() {
+				v.toggleField(field)
+			})
+		}
+	}
+}
+
+func (v *View) toggleField(field string) {
+	isActive := v.state.data.activeFields[field]
+	v.state.data.activeFields[field] = !isActive
+
+	if !isActive {
+		v.components.selectedList.AddItem(field, "", 0, func() {
+			v.toggleField(field)
+		})
+
+		for i := 0; i < v.components.fieldList.GetItemCount(); i++ {
+			if text, _ := v.components.fieldList.GetItemText(i); text == field {
+				v.components.fieldList.RemoveItem(i)
+				break
+			}
+		}
+	} else {
+		for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
+			if text, _ := v.components.selectedList.GetItemText(i); text == field {
+				v.components.selectedList.RemoveItem(i)
+				break
+			}
+		}
+		v.components.fieldList.AddItem(field, "", 0, func() {
+			v.toggleField(field)
+		})
+	}
+
+	// Refresh results to show new column order
+	go func() {
+		v.refreshResults()
+	}()
 }

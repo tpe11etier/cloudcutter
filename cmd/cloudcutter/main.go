@@ -54,7 +54,7 @@ func main() {
 	}
 
 	// Set initial view
-	if err := viewManager.SwitchToView(types.ViewDynamoDB); err != nil {
+	if err := viewManager.SwitchToView(types.ViewElastic); err != nil {
 		log.Fatalf("Failed to set initial view: %v", err)
 	}
 
