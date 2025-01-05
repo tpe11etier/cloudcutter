@@ -5,6 +5,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 )
 
 type Action struct {
@@ -63,10 +64,11 @@ func (h *Header) setupLeftTable() {
 	// Set up headers
 	headers := []string{"  Environment Variables", "", "  Actions"}
 	for col, headerText := range headers {
-		cell := tview.NewTableCell(fmt.Sprintf("[yellow::b]%s", headerText)).
-			SetTextColor(tcell.ColorYellow).
+		cell := tview.NewTableCell(headerText).
+			SetTextColor(style.GruvboxMaterial.Yellow).
 			SetAlign(tview.AlignLeft).
-			SetSelectable(false)
+			SetSelectable(false).
+			SetAttributes(tcell.AttrBold)
 		if headerText == "" {
 			cell.SetText("  ")
 		}
@@ -105,7 +107,7 @@ func (h *Header) UpdateSummary(items []types.SummaryItem) {
 	h.rightTable.SetTitle("Summary").SetTitleAlign(tview.AlignRight)
 
 	h.rightTable.SetCell(0, 0, tview.NewTableCell("   Summary").
-		SetTextColor(tcell.ColorYellow).
+		SetTextColor(style.GruvboxMaterial.Yellow).
 		SetAlign(tview.AlignCenter).
 		SetSelectable(false))
 

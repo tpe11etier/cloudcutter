@@ -159,7 +159,11 @@ type ESSearchResult struct {
 	ScrollID string `json:"_scroll_id"`
 	Source   json.RawMessage
 	Hits     struct {
-		Total int           `json:"total"`
-		Hits  []ESSearchHit `json:"hits"`
+		Total struct {
+			Value    int    `json:"value"`
+			Relation string `json:"relation"`
+		} `json:"total"`
+		Hits []ESSearchHit `json:"hits"`
 	} `json:"hits"`
+	Took int `json:"took"`
 }

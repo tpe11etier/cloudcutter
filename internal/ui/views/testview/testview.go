@@ -48,7 +48,7 @@ package testview
 //					BorderColor: tcell.ColorBeige,
 //					Title:       " Single Table ",
 //					TitleAlign:  tview.AlignCenter,
-//					TitleColor:  tcell.ColorYellow,
+//					TitleColor:  style.GruvboxMaterial.Yellow,
 //				},
 //				Properties: map[string]any{
 //					"selectedBackgroundColor": tcell.ColorDarkCyan,
@@ -91,7 +91,7 @@ package testview
 //					BorderColor: tcell.ColorBeige,
 //					Title:       " Table 1 ",
 //					TitleAlign:  tview.AlignCenter,
-//					TitleColor:  tcell.ColorYellow,
+//					TitleColor:  style.GruvboxMaterial.Yellow,
 //				},
 //				Properties: map[string]any{
 //					"selectedBackgroundColor": tcell.ColorDarkCyan,
@@ -113,7 +113,7 @@ package testview
 //					BorderColor: tcell.ColorBeige,
 //					Title:       " Table 2 ",
 //					TitleAlign:  tview.AlignCenter,
-//					TitleColor:  tcell.ColorYellow,
+//					TitleColor:  style.GruvboxMaterial.Yellow,
 //				},
 //				Properties: map[string]any{
 //					"selectedBackgroundColor": tcell.ColorDarkCyan,
@@ -157,7 +157,7 @@ package testview
 //					BorderColor: tcell.ColorBeige,
 //					Title:       " Items ",
 //					TitleAlign:  tview.AlignCenter,
-//					TitleColor:  tcell.ColorYellow,
+//					TitleColor:  style.GruvboxMaterial.Yellow,
 //				},
 //				Properties: map[string]any{
 //					"items":                   []string{"Item 1", "Item 2"},
@@ -186,7 +186,7 @@ package testview
 //							BorderColor: tcell.ColorBeige,
 //							Title:       " Table 3 ",
 //							TitleAlign:  tview.AlignCenter,
-//							TitleColor:  tcell.ColorYellow,
+//							TitleColor:  style.GruvboxMaterial.Yellow,
 //						},
 //						Properties: map[string]any{
 //							"selectedBackgroundColor": tcell.ColorDarkCyan,
@@ -208,7 +208,7 @@ package testview
 //							BorderColor: tcell.ColorBeige,
 //							Title:       " Table 4 ",
 //							TitleAlign:  tview.AlignCenter,
-//							TitleColor:  tcell.ColorYellow,
+//							TitleColor:  style.GruvboxMaterial.Yellow,
 //						},
 //						Properties: map[string]any{
 //							"selectedBackgroundColor": tcell.ColorDarkCyan,
@@ -253,7 +253,7 @@ package testview
 //
 //	// Make headers stand out
 //	if row == 0 {
-//		cell.SetTextColor(tcell.ColorYellow).
+//		cell.SetTextColor(style.GruvboxMaterial.Yellow).
 //			SetAlign(tview.AlignCenter).
 //			SetAttributes(tcell.AttrBold)
 //	}

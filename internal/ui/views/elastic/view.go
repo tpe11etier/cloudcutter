@@ -1,6 +1,7 @@
 package elastic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -135,14 +138,18 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 		},
 	}
 
+	v.manager.Logger().Info("Initializing Elastic View", "defaultIndex", defaultIndex)
+
 	// Setup layout and initialize fields
 	v.setupLayout()
 	err := v.initFieldsSync()
 	if err != nil {
+		v.manager.Logger().Error("Failed to initialize fields", "error", err)
 		return v, err
 	}
 
 	manager.SetFocus(v.components.filterInput)
+	v.manager.Logger().Info("Elastic View successfully initialized")
 	return v, nil
 }
 
@@ -192,7 +199,8 @@ func (v *View) setupLayout() {
 								Border:      true,
 								BorderColor: tcell.ColorBeige,
 								Title:       " Active Filters (Delete/Backspace to remove all, or press filter number) ",
-								TitleColor:  tcell.ColorYellow,
+								TitleColor:  style.GruvboxMaterial.Yellow,
+								TextColor:   tcell.ColorBeige,
 							},
 						},
 						Properties: types.TextViewProperties{
@@ -216,14 +224,14 @@ func (v *View) setupLayout() {
 							{
 								ID:         "indexView",
 								Type:       types.ComponentInputField,
-								Proportion: 2,
+								Proportion: 1,
 								Style: types.InputFieldStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
 										Title:       " Index ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  tcell.ColorYellow,
+										TitleColor:  style.GruvboxMaterial.Yellow,
 									},
 									LabelColor:           tcell.ColorMediumTurquoise,
 									FieldBackgroundColor: tcell.ColorBlack,
@@ -253,7 +261,7 @@ func (v *View) setupLayout() {
 										BorderColor: tcell.ColorBeige,
 										Title:       " Timeframe ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  tcell.ColorYellow,
+										TitleColor:  style.GruvboxMaterial.Yellow,
 									},
 									LabelColor:           tcell.ColorMediumTurquoise,
 									FieldBackgroundColor: tcell.ColorBlack,
@@ -291,7 +299,7 @@ func (v *View) setupLayout() {
 										BorderColor: tcell.ColorBeige,
 										Title:       " # Results ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  tcell.ColorYellow,
+										TitleColor:  style.GruvboxMaterial.Yellow,
 									},
 									LabelColor:           tcell.ColorMediumTurquoise,
 									FieldBackgroundColor: tcell.ColorBlack,
@@ -331,7 +339,7 @@ func (v *View) setupLayout() {
 								BorderColor: tcell.ColorBeige,
 								TitleAlign:  tview.AlignLeft,
 								Title:       " Filter Results ",
-								TitleColor:  tcell.ColorYellow,
+								TitleColor:  style.GruvboxMaterial.Yellow,
 							},
 							LabelColor:           tcell.ColorMediumTurquoise,
 							FieldBackgroundColor: tcell.ColorBlack,
@@ -352,10 +360,10 @@ func (v *View) setupLayout() {
 			},
 			// Results Section
 			{
-				ID:        "resultsFlex",
-				Type:      types.ComponentFlex,
-				Direction: tview.FlexColumn,
-				FixedSize: 50,
+				ID:         "resultsFlex",
+				Type:       types.ComponentFlex,
+				Direction:  tview.FlexColumn,
+				Proportion: 3,
 				Children: []types.Component{
 					// Left side - Fields lists
 					{
@@ -373,7 +381,8 @@ func (v *View) setupLayout() {
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
 										Title:       "Available Fields (Enter to select)",
-										TitleColor:  tcell.ColorYellow,
+										TitleColor:  style.GruvboxMaterial.Yellow,
+										TextColor:   tcell.ColorBeige,
 									},
 									SelectedTextColor:       tcell.ColorBeige,
 									SelectedBackgroundColor: tcell.ColorDarkCyan,
@@ -395,8 +404,9 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "Selected Fields (j/k to move)",
-										TitleColor:  tcell.ColorYellow,
+										Title:       "Selected Fields (j↓/k↑ to order)",
+										TitleColor:  style.GruvboxMaterial.Yellow,
+										TextColor:   tcell.ColorBeige,
 									},
 									SelectedTextColor:       tcell.ColorBeige,
 									SelectedBackgroundColor: tcell.ColorDarkCyan,
@@ -591,64 +601,6 @@ func (v *View) previousPage() {
 	}
 }
 
-func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
-	switch currentFocus {
-	case v.components.filterInput:
-		v.manager.App().SetFocus(v.components.activeFilters)
-	case v.components.activeFilters:
-		v.manager.App().SetFocus(v.components.indexView)
-	case v.components.indexView:
-		v.manager.App().SetFocus(v.components.timeframeInput)
-	case v.components.timeframeInput:
-		v.manager.App().SetFocus(v.components.numResultsInput)
-	case v.components.numResultsInput:
-		v.manager.App().SetFocus(v.components.localFilterInput)
-
-	case v.components.localFilterInput:
-		v.manager.App().SetFocus(v.components.fieldList)
-	case v.components.fieldList:
-		v.manager.App().SetFocus(v.components.selectedList)
-	case v.components.selectedList:
-		v.manager.App().SetFocus(v.components.resultsTable)
-	case v.components.resultsTable:
-		v.manager.App().SetFocus(v.components.filterInput)
-	default:
-		v.manager.App().SetFocus(v.components.filterInput)
-	}
-	return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
-}
-
-func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		filter := v.components.filterInput.GetText()
-		if filter == "" {
-			return nil
-		}
-		v.addFilter(filter)
-		v.components.filterInput.SetText("")
-		v.refreshResults()
-		return nil
-	}
-	return event
-}
-
-func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyDelete, tcell.KeyBackspace2, tcell.KeyBackspace:
-		if len(v.state.data.filters) > 0 {
-			v.deleteSelectedFilter()
-		}
-		return nil
-	case tcell.KeyRune:
-		if num, err := strconv.Atoi(string(event.Rune())); err == nil && num > 0 && num <= len(v.state.data.filters) {
-			v.deleteFilterByIndex(num - 1)
-			return nil
-		}
-	}
-	return event
-}
-
 func (v *View) addFilter(filter string) {
 	if strings.TrimSpace(filter) == "" {
 		return
@@ -696,19 +648,6 @@ func (v *View) updateFiltersDisplay() {
 	}
 
 	v.components.activeFilters.SetText(strings.Join(filters, " | "))
-}
-
-func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		pattern := v.components.indexView.GetText()
-		if pattern != "" {
-			v.state.search.currentIndex = pattern
-			v.refreshResults()
-		}
-		return nil
-	}
-	return event
 }
 
 func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primitive) {
@@ -841,56 +780,6 @@ func (v *View) filterFieldList(filter string) {
 	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing fields matching '%s' (%d matches)", filter, len(matches)))
 }
 
-func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		// Field list only handles activation
-		index := v.components.fieldList.GetCurrentItem()
-		if index >= 0 {
-			mainText, _ := v.components.fieldList.GetItemText(index)
-			v.toggleField(mainText)
-		}
-		return nil
-	case tcell.KeyBackspace, tcell.KeyBackspace2:
-		v.state.ui.fieldListFilter = ""
-		v.filterFieldList("")
-		return nil
-	}
-	return event
-}
-
-// Add new handler for selected list
-func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'k': // Move up
-			index := v.components.selectedList.GetCurrentItem()
-			if index >= 0 {
-				mainText, _ := v.components.selectedList.GetItemText(index)
-				v.moveFieldPosition(mainText, true)
-			}
-			return nil
-		case 'j': // Move down
-			index := v.components.selectedList.GetCurrentItem()
-			if index >= 0 {
-				mainText, _ := v.components.selectedList.GetItemText(index)
-				v.moveFieldPosition(mainText, false)
-			}
-			return nil
-		}
-	case tcell.KeyEnter:
-		// Selected list only handles deactivation
-		index := v.components.selectedList.GetCurrentItem()
-		if index >= 0 {
-			mainText, _ := v.components.selectedList.GetItemText(index)
-			v.toggleField(mainText) // Deactivate when Enter pressed in selected list
-		}
-		return nil
-	}
-	return event
-}
-
 func (v *View) setupResultsTableHeaders(headers []string) {
 	table := v.components.resultsTable
 	table.Clear()
@@ -905,7 +794,7 @@ func (v *View) setupResultsTableHeaders(headers []string) {
 	for col, header := range headers {
 		table.SetCell(0, col,
 			tview.NewTableCell(header).
-				SetTextColor(tcell.ColorYellow).
+				SetTextColor(style.GruvboxMaterial.Yellow).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false).
 				SetAttributes(tcell.AttrBold))
@@ -937,7 +826,7 @@ func (v *View) showJSONModal(entry *DocEntry) {
 
 	textView := tview.NewTextView()
 	textView.SetTitle("'y' to copy | 'Esc' to close").
-		SetTitleColor(tcell.ColorYellow)
+		SetTitleColor(style.GruvboxMaterial.Yellow)
 	textView.SetText(jsonStr).
 		SetDynamicColors(true).
 		SetRegions(true).
@@ -1046,7 +935,7 @@ func (v *View) updateHeader() {
 		{Key: "Index", Value: v.state.search.currentIndex},
 		{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
 		{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
-		{Key: "Page", Value: fmt.Sprintf("[yellow]%d/%d[-]", v.state.pagination.currentPage, v.state.pagination.totalPages)},
+		{Key: "Page", Value: fmt.Sprintf("[%s::b]%d/%d[-]", style.GruvboxMaterial.Yellow, v.state.pagination.currentPage, v.state.pagination.totalPages)},
 		{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
 	}
 	v.manager.UpdateHeader(summary)
@@ -1097,23 +986,19 @@ func (v *View) displayCurrentPage() {
 
 	v.components.resultsTable.Clear()
 
-	// Get headers from active/selected fields
 	headers := v.getActiveHeaders()
 	if len(headers) == 0 {
 		v.manager.UpdateStatusBar("No fields selected. Select a field to see data.")
 		return
 	}
 
-	// Calculate how many rows can be displayed based on terminal window size
 	v.calculateVisibleRows()
 
-	// Prepare headers array - if row numbers enabled, add "#" column at start
 	displayHeaders := headers
 	if v.state.ui.showRowNumbers {
 		displayHeaders = append([]string{"#"}, headers...)
 	}
 
-	// Set up header row with these column headers
 	v.setupResultsTableHeaders(displayHeaders)
 
 	totalResults := len(v.state.data.displayedResults)
@@ -1122,22 +1007,23 @@ func (v *View) displayCurrentPage() {
 		return
 	}
 
-	// Calculate which slice of results to show on this page
 	start := (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
+	if start >= totalResults {
+		// If start is beyond total results, adjust to last page
+		v.state.pagination.currentPage = (totalResults + v.state.pagination.pageSize - 1) / v.state.pagination.pageSize
+		start = (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
+	}
 	end := start + v.state.pagination.pageSize
 	if end > totalResults {
 		end = totalResults
 	}
 
-	// Get just the results for this page
 	pageResults := v.state.data.displayedResults[start:end]
 
-	// Populate table cells
 	for rowIdx, entry := range pageResults {
 		currentRow := rowIdx + 1
 		currentCol := 0
 
-		// If showing row numbers, add the row number cell first
 		if v.state.ui.showRowNumbers {
 			v.components.resultsTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
@@ -1172,7 +1058,8 @@ func (v *View) updateStatusBar(currentPageSize int) {
 	}
 
 	if v.state.ui.showRowNumbers {
-		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
+		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
+			style.GruvboxMaterial.Yellow)
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)
@@ -1420,13 +1307,19 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 }
 
 func (v *View) refreshResults() {
+	v.manager.Logger().Info("Starting results refresh",
+		"isLoading", v.state.ui.isLoading,
+		"currentIndex", v.state.search.currentIndex,
+		"numResults", v.state.search.numResults)
+
 	if v.state.ui.isLoading {
+		v.manager.Logger().Info("Skipping refresh - already loading")
 		return
 	}
-
 	currentFocus := v.manager.App().GetFocus()
 	v.showLoading("Refreshing results")
 	v.state.ui.isLoading = true
+	v.manager.Logger().Info("Refreshing results", "currentIndex", v.state.search.currentIndex)
 
 	go func() {
 		defer func() {
@@ -1443,8 +1336,10 @@ func (v *View) refreshResults() {
 
 		// Use scroll API if we expect more than 10k results
 		if v.state.search.numResults > 10000 {
+			v.manager.Logger().Debug("Fetching large result set")
 			results, err = v.fetchLargeResultSet()
 			if err != nil {
+				v.manager.Logger().Error("Error fetching results", "error", err)
 				v.manager.App().QueueUpdateDraw(func() {
 					v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching results: %v", err))
 				})
@@ -1463,9 +1358,10 @@ func (v *View) refreshResults() {
 				return
 			}
 
-			totalHits = result.Hits.Total
+			totalHits = result.Hits.Total.Value
 			results, err = v.processSearchResults(result.Hits.Hits)
 			if err != nil {
+				v.manager.Logger().Error("Error processing results", "error", err)
 				v.manager.App().QueueUpdateDraw(func() {
 					v.manager.UpdateStatusBar(fmt.Sprintf("Error processing results: %v", err))
 				})
@@ -1473,6 +1369,7 @@ func (v *View) refreshResults() {
 			}
 		}
 
+		v.manager.Logger().Info("Results refreshed successfully", "totalResults", len(results))
 		v.manager.App().QueueUpdateDraw(func() {
 			v.updateAvailableFields(results)
 
@@ -1487,7 +1384,7 @@ func (v *View) refreshResults() {
 			v.displayCurrentPage()
 			v.updateHeader()
 
-			v.manager.UpdateStatusBar(fmt.Sprintf("Found %d logs total (displaying %d)",
+			v.manager.UpdateStatusBar(fmt.Sprintf("Found %d results total (displaying %d)",
 				totalHits, len(results)))
 		})
 	}()
@@ -1525,29 +1422,6 @@ func (v *View) updateResultsState(results []*DocEntry) {
 	}
 }
 
-func (v *View) executeSearch(query map[string]any) (*types.ESSearchResult, error) {
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return nil, fmt.Errorf("error creating query: %v", err)
-	}
-
-	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
-		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("search error: %v", err)
-	}
-	defer res.Body.Close()
-
-	var result types.ESSearchResult
-	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("error decoding response: %v", err)
-	}
-
-	return &result, nil
-}
-
 func (v *View) getEntryFields(entries []*DocEntry) []string {
 	fieldSet := make(map[string]bool)
 
@@ -1575,48 +1449,6 @@ func (v *View) updateFieldList(fields []string) {
 			v.toggleField(fieldName)
 		})
 	}
-}
-
-func (v *View) initFieldsSync() error {
-	query := map[string]any{
-		"size": v.state.pagination.pageSize,
-		"sort": []map[string]any{
-			{
-				"unixTime": map[string]any{
-					"order": "desc",
-				},
-			},
-		},
-	}
-
-	result, err := v.executeSearch(query)
-	if err != nil {
-		return err
-	}
-
-	// Process results
-	entries, err := v.processSearchResults(result.Hits.Hits)
-	if err != nil {
-		return err
-	}
-
-	// Update state
-	v.state.data.currentResults = entries
-	fields := v.getEntryFields(entries)
-
-	v.state.data.originalFields = fields
-	v.state.data.fieldOrder = make([]string, len(fields))
-	copy(v.state.data.fieldOrder, fields)
-
-	v.state.data.filteredResults = append([]*DocEntry(nil), entries...)
-	v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
-
-	v.updateFieldList(v.state.data.fieldOrder)
-	v.updateResultsState(entries)
-	v.displayCurrentPage()
-
-	v.manager.UpdateStatusBar(fmt.Sprintf("Found %d available fields", len(fields)))
-	return nil
 }
 
 func (v *View) fetchLargeResultSet() ([]*DocEntry, error) {
@@ -1675,129 +1507,6 @@ func (v *View) fetchLargeResultSet() ([]*DocEntry, error) {
 	}
 
 	return allResults, nil
-}
-
-func (v *View) buildQuery() map[string]any {
-	query := map[string]any{
-		"_source": v.getActiveHeaders(),
-	}
-
-	timeframe := v.components.timeframeInput.GetText()
-	if timeframe != "" || len(v.state.data.filters) > 0 {
-		must := make([]any, 0, len(v.state.data.filters)+1)
-
-		if timeframe != "" {
-			must = append(must, map[string]any{
-				"range": map[string]any{
-					"unixTime": map[string]any{
-						"gte": fmt.Sprintf("now-%s", timeframe),
-						"lte": "now",
-					},
-				},
-			})
-		}
-
-		for _, filter := range v.state.data.filters {
-			parts := strings.SplitN(filter, ":", 2)
-			if len(parts) != 2 {
-				parts = strings.SplitN(filter, "=", 2)
-			}
-			if len(parts) == 2 {
-				field := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-
-				if num, err := strconv.ParseFloat(value, 64); err == nil {
-					must = append(must, map[string]any{
-						"term": map[string]any{
-							field: num,
-						},
-					})
-				} else {
-					must = append(must, map[string]any{
-						"match": map[string]any{
-							field: value,
-						},
-					})
-				}
-			}
-		}
-
-		query["query"] = map[string]any{
-			"bool": map[string]any{
-				"must": must,
-			},
-		}
-	} else {
-		query["query"] = map[string]any{
-			"match_all": map[string]any{},
-		}
-	}
-
-	// Add sort if timeframe exists
-	if timeframe != "" {
-		query["sort"] = []map[string]any{
-			{
-				"unixTime": map[string]any{
-					"order": "desc",
-				},
-			},
-		}
-	}
-
-	return query
-}
-
-func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'f':
-			v.toggleFieldList()
-			return nil
-		}
-	case tcell.KeyEnter:
-		row, _ := v.components.resultsTable.GetSelection()
-		if row > 0 && row <= len(v.state.data.displayedResults) {
-			entry := v.state.data.displayedResults[row-1]
-
-			v.showLoading("Fetching document...")
-
-			go func() {
-				defer v.hideLoading()
-
-				// Query without source filtering to get the complete document
-				res, err := v.service.Client.Get(
-					entry.Index,
-					entry.ID,
-				)
-				if err != nil {
-					v.manager.App().QueueUpdateDraw(func() {
-						v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching document: %v", err))
-					})
-					return
-				}
-				defer res.Body.Close()
-
-				var fullDoc struct {
-					Source map[string]any `json:"_source"`
-				}
-				if err := json.NewDecoder(res.Body).Decode(&fullDoc); err != nil {
-					v.manager.App().QueueUpdateDraw(func() {
-						v.manager.UpdateStatusBar(fmt.Sprintf("Error decoding document: %v", err))
-					})
-					return
-				}
-
-				// Display full doc
-				entry.data = fullDoc.Source
-				v.manager.App().QueueUpdateDraw(func() {
-					v.showJSONModal(entry)
-				})
-			}()
-		}
-		return nil
-	}
-	return event
 }
 
 func (v *View) toggleFieldList() {
@@ -1878,4 +1587,97 @@ func (v *View) toggleField(field string) {
 	go func() {
 		v.refreshResults()
 	}()
+}
+
+func (v *View) executeSearch(query map[string]any) (*types.ESSearchResult, error) {
+	queryJSON, err := json.Marshal(query)
+	if err != nil {
+		v.manager.Logger().Error("Error marshaling query", "error", err)
+		return nil, fmt.Errorf("error creating query: %v", err)
+	}
+
+	v.manager.Logger().Debug("Executing search query", "index", v.state.search.currentIndex, "query", string(queryJSON))
+
+	res, err := v.service.Client.Search(
+		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
+		v.service.Client.Search.WithBody(bytes.NewReader(queryJSON)),
+	)
+	if err != nil {
+		v.manager.Logger().Error("Search query failed", "error", err, "index", v.state.search.currentIndex)
+		return nil, fmt.Errorf("search error: %v", err)
+	}
+	defer res.Body.Close()
+
+	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		v.manager.Logger().Error("Failed to read search response", "error", err)
+		return nil, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	v.manager.Logger().Debug("Raw search response", "response", string(bodyBytes))
+
+	var result types.ESSearchResult
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		v.manager.Logger().Error("Failed to unmarshal search response", "error", err, "response", string(bodyBytes))
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+
+	v.manager.Logger().Info("Search executed successfully", "hits", result.Hits.Total.Value, "took", result.Took)
+	return &result, nil
+}
+
+func (v *View) buildQuery() map[string]any {
+	query := BuildQuery(v.state.data.filters, v.state.search.numResults)
+	return query
+}
+
+func (v *View) initFieldsSync() error {
+	// List available indices first
+	indices, err := v.service.ListIndices(context.Background(), "*")
+	if err != nil {
+		v.manager.Logger().Debug(fmt.Sprintf("[ERROR] Failed to list indices: %v", err))
+	} else {
+		v.manager.Logger().Debug(fmt.Sprintf("[DEBUG] Available indices: %v", indices))
+	}
+
+	// Simple query for initialization
+	query := map[string]any{
+		"query": map[string]any{
+			"match_all": map[string]any{},
+		},
+		"size": v.state.pagination.pageSize,
+	}
+
+	result, err := v.executeSearch(query)
+	if err != nil {
+		return err
+	}
+
+	entries, err := v.processSearchResults(result.Hits.Hits)
+	if err != nil {
+		return err
+	}
+
+	v.state.data.currentResults = entries
+	fields := v.getEntryFields(entries)
+
+	v.state.data.originalFields = fields
+	v.state.data.fieldOrder = make([]string, len(fields))
+	copy(v.state.data.fieldOrder, fields)
+
+	v.state.data.filteredResults = append([]*DocEntry(nil), entries...)
+	v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
+
+	v.updateFieldList(v.state.data.fieldOrder)
+	v.updateResultsState(entries)
+	v.displayCurrentPage()
+
+	return nil
+}
+
+func (v *View) Close() error {
+	if v.manager.Logger() != nil {
+		return v.manager.Logger().Close()
+	}
+	return nil
 }

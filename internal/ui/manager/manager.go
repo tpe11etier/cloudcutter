@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
@@ -14,6 +15,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 )
 
@@ -37,6 +39,7 @@ type Manager struct {
 	layout         *tview.Flex
 	awsConfig      aws.Config
 	primitivesByID map[string]tview.Primitive
+	logger         *logger.Logger
 
 	prompt       *components.Prompt
 	filterPrompt *components.Prompt
@@ -61,7 +64,7 @@ func (vm *Manager) ActiveView() tview.Primitive {
 	return vm.activeView.Content()
 }
 
-func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config) *Manager {
+func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log *logger.Logger) *Manager {
 	ctx, cancel := context.WithCancel(ctx)
 	vm := &Manager{
 		ctx:            ctx,
@@ -77,6 +80,7 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config) *Man
 		primitivesByID: make(map[string]tview.Primitive),
 		StatusChan:     make(chan string, 10),
 		help:           help.NewHelp(),
+		logger:         log,
 	}
 
 	vm.profileHandler = profile.NewProfileHandler(vm.StatusChan)
@@ -201,6 +205,8 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 			list.SetSelectedStyle(tcell.StyleDefault.
 				Foreground(style.SelectedTextColor).
 				Background(style.SelectedBackgroundColor))
+			list.SetMainTextColor(style.TextColor).
+				SetTitleColor(style.TitleColor)
 		}
 
 		if props, ok := c.Properties.(types.ListProperties); ok {
@@ -401,7 +407,7 @@ func (vm *Manager) SwitchToView(name string) error {
 	vm.pages.SwitchToPage(name)
 	vm.header.ClearSummary()
 	vm.statusBar.SetText(fmt.Sprintf("Status: %s view active", name))
-	vm.header.SetTitle(fmt.Sprintf(" Cloud Cutter - %s ", name)).SetTitleColor(tcell.ColorYellow)
+	vm.header.SetTitle(fmt.Sprintf(" Cloud Cutter - %s ", name)).SetTitleColor(style.GruvboxMaterial.Yellow)
 
 	return nil
 }
@@ -714,7 +720,7 @@ func (vm *Manager) showCmdPrompt() {
 	vm.prompt.InputField.SetLabel(" > ")
 	vm.prompt.InputField.SetLabelColor(tcell.ColorTeal)
 	vm.prompt.SetTitle(" Command ")
-	vm.prompt.SetTitleColor(tcell.ColorYellow)
+	vm.prompt.SetTitleColor(style.GruvboxMaterial.Yellow)
 	vm.prompt.SetBorder(true)
 	vm.prompt.SetTitleAlign(tview.AlignLeft)
 	vm.prompt.SetBorderColor(tcell.ColorMediumTurquoise)
@@ -802,4 +808,8 @@ func (vm *Manager) hideRegionSelector() {
 
 func (vm *Manager) Help() *help.Help {
 	return vm.help
+}
+
+func (vm *Manager) Logger() *logger.Logger {
+	return vm.logger
 }

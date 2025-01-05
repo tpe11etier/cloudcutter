@@ -112,12 +112,12 @@ package ec2
 //
 //	// Set header row
 //	table.SetCell(0, 0, tview.NewTableCell("Property").
-//		SetTextColor(tcell.ColorYellow).
+//		SetTextColor(style.GruvboxMaterial.Yellow).
 //		SetAlign(tview.AlignLeft).
 //		SetSelectable(false).
 //		SetAttributes(tcell.AttrBold))
 //	table.SetCell(0, 1, tview.NewTableCell("Value").
-//		SetTextColor(tcell.ColorYellow).
+//		SetTextColor(style.GruvboxMaterial.Yellow).
 //		SetAlign(tview.AlignLeft).
 //		SetSelectable(false).
 //		SetAttributes(tcell.AttrBold))

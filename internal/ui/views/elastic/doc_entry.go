@@ -8,15 +8,17 @@ import (
 	"time"
 )
 
+// DocEntry represents a single document entry with metadata and dynamic fields.
 type DocEntry struct {
-	data    map[string]any
-	ID      string   `json:"_id"`
-	Index   string   `json:"_index"`
-	Type    string   `json:"_type"`
-	Score   *float64 `json:"_score"`
-	Version *int64   `json:"_version"`
+	data    map[string]any // The main document data
+	ID      string         `json:"_id"`      // Document ID
+	Index   string         `json:"_index"`   // Index name
+	Type    string         `json:"_type"`    // Document type
+	Score   *float64       `json:"_score"`   // Relevance score (optional)
+	Version *int64         `json:"_version"` // Document version (optional)
 }
 
+// NewDocEntry creates a new DocEntry instance by unmarshalling the source data and setting metadata fields.
 func NewDocEntry(source []byte, id, index, docType string, score *float64, version *int64) (*DocEntry, error) {
 	var data map[string]any
 	if err := json.Unmarshal(source, &data); err != nil {
@@ -33,6 +35,7 @@ func NewDocEntry(source []byte, id, index, docType string, score *float64, versi
 	}, nil
 }
 
+// GetMetadataFields returns a list of metadata fields available for the document.
 func (de *DocEntry) GetMetadataFields() []string {
 	fields := []string{"_id", "_index", "_type"}
 	if de.Score != nil {
@@ -44,12 +47,14 @@ func (de *DocEntry) GetMetadataFields() []string {
 	return fields
 }
 
+// GetAvailableFields retrieves all fields in the document, including nested ones.
 func (de *DocEntry) GetAvailableFields() []string {
 	fields := de.GetMetadataFields()
 	de.getFieldsRecursive(de.data, "", &fields)
 	return fields
 }
 
+// isLeafNode determines if a given value is a leaf node (not a map or slice).
 func isLeafNode(v any) bool {
 	if v == nil {
 		return true
@@ -63,6 +68,7 @@ func isLeafNode(v any) bool {
 	}
 }
 
+// formatSeverity formats severity values to a string representation.
 func formatSeverity(sev any) string {
 	switch v := sev.(type) {
 	case float64:
@@ -76,21 +82,10 @@ func formatSeverity(sev any) string {
 	}
 }
 
+// getFieldsRecursive recursively retrieves all field paths in a nested structure.
 func (de *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string) {
 	if data == nil {
 		return
-	}
-
-	// Add metadata fields if we're at the root level (empty prefix)
-	if prefix == "" {
-		metaFields := []string{"_id", "_index", "_type"}
-		if de.Score != nil {
-			metaFields = append(metaFields, "_score")
-		}
-		if de.Version != nil {
-			metaFields = append(metaFields, "_version")
-		}
-		*fields = append(*fields, metaFields...)
 	}
 
 	switch v := data.(type) {
@@ -114,6 +109,7 @@ func (de *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string
 	}
 }
 
+// GetFormattedValue retrieves and formats a field value based on its name.
 func (de *DocEntry) GetFormattedValue(field string) string {
 	switch field {
 	case "_id":
@@ -155,6 +151,7 @@ func (de *DocEntry) GetFormattedValue(field string) string {
 	}
 }
 
+// GetValue retrieves the value for a specified field path in the document.
 func (de *DocEntry) GetValue(path string) any {
 	parts := strings.Split(path, ".")
 	current := de.data
@@ -164,7 +161,6 @@ func (de *DocEntry) GetValue(path string) any {
 			return nil
 		}
 
-		// Handle array access for nested fields
 		if strings.HasSuffix(part, "]") {
 			arrayKey, index := parseArrayAccess(part)
 			if index >= 0 {
@@ -195,6 +191,7 @@ func (de *DocEntry) GetValue(path string) any {
 	return nil
 }
 
+// parseArrayAccess parses an array field path and extracts the key and index.
 func parseArrayAccess(field string) (string, int) {
 	start := strings.Index(field, "[")
 	end := strings.Index(field, "]")

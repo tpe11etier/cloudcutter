@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 )
 
 const (
@@ -106,7 +107,7 @@ func (h *Help) setupLayout() {
 func (h *Help) addCategoryToTable(category *HelpCategory, row *int) {
 	h.table.SetCell(*row, 0,
 		tview.NewTableCell(fmt.Sprintf("[::b]%s", category.Title)).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(style.GruvboxMaterial.Yellow).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 	*row++

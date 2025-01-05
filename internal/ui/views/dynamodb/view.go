@@ -8,6 +8,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 	"sort"
 	"strings"
@@ -97,9 +98,6 @@ func (v *View) Show() {
 func (v *View) Hide() {}
 
 func (v *View) fetchTables() {
-	v.showLoading("Fetching tables...")
-	v.leftPanel.Clear()
-
 	tableNames, err := v.service.ListTables(v.ctx)
 	if err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching DynamoDB tables: %v", err))
@@ -371,7 +369,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 
 	for col, header := range displayHeaders {
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(style.GruvboxMaterial.Yellow).
 			SetAlign(tview.AlignCenter).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
@@ -423,9 +421,12 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d items",
 		v.state.currentPage, v.state.totalPages,
 		len(pageItems), totalItems)
+
 	if v.state.showRowNumbers {
-		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
+		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
+			style.GruvboxMaterial.Yellow)
 	}
+
 	v.manager.UpdateStatusBar(statusMsg)
 }
 
@@ -596,14 +597,20 @@ func (v *View) showTableItems(tableName string) {
 func (v *View) Reinitialize(cfg aws.Config) error {
 	v.service = dynamodb.NewService(cfg)
 
+	// Clear out old table info and UI
 	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.state.originalItems = nil
 	v.state.filteredItems = nil
 	v.leftPanel.Clear()
 	v.dataTable.Clear()
 
-	// Re-fetch data with new service
 	v.initializeTableCache()
+
+	if v.manager.ActiveView() == v.Content() {
+		v.manager.UpdateStatusBar("Fetching tables...")
+	}
+
+	// Finally, call Show() or whatever you normally do to refresh
 	v.Show()
 	return nil
 }
@@ -816,7 +823,7 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 	// Add borders and title for the table
 	table.SetBorder(true).
 		SetTitle(" Item Details (ESC to close, 'y' to copy value) ").
-		SetTitleColor(tcell.ColorYellow).
+		SetTitleColor(style.GruvboxMaterial.Yellow).
 		SetBorderColor(tcell.ColorMediumTurquoise)
 
 	// Calculate modal height based on the number of attributes
@@ -930,7 +937,8 @@ func (v *View) filterItems(filter string) {
 	}
 
 	if v.state.showRowNumbers {
-		statusMsg += " | [yellow]Row numbers: on (press 'r' to toggle)[-]"
+		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
+			style.GruvboxMaterial.Yellow)
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)
