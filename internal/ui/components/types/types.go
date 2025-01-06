@@ -1,7 +1,6 @@
 package types
 
 import (
-	"encoding/json"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
@@ -146,24 +145,24 @@ type Component struct {
 	OnCreate   func(p tview.Primitive)
 }
 
-type ESSearchHit struct {
-	ID      string          `json:"_id"`
-	Index   string          `json:"_index"`
-	Type    string          `json:"_type"`
-	Score   *float64        `json:"_score"`
-	Version *int64          `json:"_version"`
-	Source  json.RawMessage `json:"_source"`
-}
-
-type ESSearchResult struct {
-	ScrollID string `json:"_scroll_id"`
-	Source   json.RawMessage
-	Hits     struct {
-		Total struct {
-			Value    int    `json:"value"`
-			Relation string `json:"relation"`
-		} `json:"total"`
-		Hits []ESSearchHit `json:"hits"`
-	} `json:"hits"`
-	Took int `json:"took"`
-}
+//type ESSearchHit struct {
+//	ID      string          `json:"_id"`
+//	Index   string          `json:"_index"`
+//	Type    string          `json:"_type"`
+//	Score   *float64        `json:"_score"`
+//	Version *int64          `json:"_version"`
+//	Source  json.RawMessage `json:"_source"`
+//}
+//
+//type ESSearchResult struct {
+//	ScrollID string `json:"_scroll_id"`
+//	Source   json.RawMessage
+//	Hits     struct {
+//		Total struct {
+//			Value    int    `json:"value"`
+//			Relation string `json:"relation"`
+//		} `json:"total"`
+//		Hits []ESSearchHit `json:"hits"`
+//	} `json:"hits"`
+//	Took int `json:"took"`
+//}

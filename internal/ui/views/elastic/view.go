@@ -16,6 +16,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+
 	"io"
 	"math"
 	"sort"
@@ -1390,7 +1391,7 @@ func (v *View) refreshResults() {
 	}()
 }
 
-func (v *View) processSearchResults(hits []types.ESSearchHit) ([]*DocEntry, error) {
+func (v *View) processSearchResults(hits []ESSearchHit) ([]*DocEntry, error) {
 	results := make([]*DocEntry, 0, len(hits))
 
 	for _, hit := range hits {
@@ -1474,7 +1475,7 @@ func (v *View) fetchLargeResultSet() ([]*DocEntry, error) {
 	}
 
 	for {
-		var result types.ESSearchResult
+		var result ESSearchResult
 		if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
 			res.Body.Close()
 			return nil, fmt.Errorf("error decoding response: %v", err)
@@ -1589,7 +1590,7 @@ func (v *View) toggleField(field string) {
 	}()
 }
 
-func (v *View) executeSearch(query map[string]any) (*types.ESSearchResult, error) {
+func (v *View) executeSearch(query map[string]any) (*ESSearchResult, error) {
 	queryJSON, err := json.Marshal(query)
 	if err != nil {
 		v.manager.Logger().Error("Error marshaling query", "error", err)
@@ -1616,7 +1617,7 @@ func (v *View) executeSearch(query map[string]any) (*types.ESSearchResult, error
 
 	v.manager.Logger().Debug("Raw search response", "response", string(bodyBytes))
 
-	var result types.ESSearchResult
+	var result ESSearchResult
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		v.manager.Logger().Error("Failed to unmarshal search response", "error", err, "response", string(bodyBytes))
 		return nil, fmt.Errorf("error decoding response: %v", err)
