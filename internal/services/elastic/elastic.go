@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +21,8 @@ import (
 
 type Service struct {
 	Client *elasticsearch.Client
+	cache  map[string]indexStatsCache
+	mu     sync.RWMutex
 }
 
 type awsTransport struct {
@@ -55,8 +59,17 @@ func NewService(cfg aws.Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating Elasticsearch client: %v", err)
 	}
+	s := &Service{
+		Client: client,
+		cache:  make(map[string]indexStatsCache),
+		mu:     sync.RWMutex{},
+	}
 
-	return &Service{Client: client}, nil
+	if err := s.PreloadIndexStats(context.Background()); err != nil {
+		return s, fmt.Errorf("initial cache preload failed: %w", err)
+	}
+
+	return s, nil
 }
 
 func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
@@ -210,4 +223,165 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		names = append(names, idx.Index)
 	}
 	return names, nil
+}
+
+type IndexStats struct {
+	Health       string `json:"health"`
+	Status       string `json:"status"`
+	Index        string `json:"index"`
+	UUID         string `json:"uuid"`
+	Primary      string `json:"pri"`
+	Replica      string `json:"rep"`
+	DocsCount    string `json:"docs.count"`
+	DocsDeleted  string `json:"docs.deleted"`
+	StoreSize    string `json:"store.size"`
+	PriStoreSize string `json:"pri.store.size"`
+}
+
+type indexStatsCache struct {
+	stats *IndexStats
+}
+
+func (s *Service) PreloadIndexStats(ctx context.Context) error {
+	// Get all indices stats in one request
+	res, err := s.Client.Cat.Indices(
+		s.Client.Cat.Indices.WithContext(ctx),
+		s.Client.Cat.Indices.WithFormat("json"),
+		s.Client.Cat.Indices.WithH("health,status,index,uuid,pri,rep,docs.count,docs.deleted,store.size,pri.store.size"),
+		s.Client.Cat.Indices.WithV(true),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to preload index stats: %w", err)
+	}
+	defer res.Body.Close()
+
+	var stats []IndexStats
+	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
+		return fmt.Errorf("failed to decode index stats: %w", err)
+	}
+
+	// Clear existing cache and populate with new stats
+	s.mu.Lock()
+	s.cache = make(map[string]indexStatsCache)
+
+	for _, stat := range stats {
+		s.cache[stat.Index] = indexStatsCache{
+			stats: &stat,
+		}
+	}
+
+	patterns := make(map[string][]IndexStats)
+	for _, stat := range stats {
+		// Extract pattern from index name (e.g., "main-summary-*" from "main-summary-2024.01.08")
+		parts := strings.Split(stat.Index, "-")
+		if len(parts) >= 2 {
+			pattern := strings.Join(parts[:2], "-") + "-*"
+			patterns[pattern] = append(patterns[pattern], stat)
+		}
+	}
+
+	// Calculate aggregated stats for patterns
+	for pattern, matchingStats := range patterns {
+		total := IndexStats{
+			Health: "green",
+			Status: "open",
+			Index:  pattern,
+		}
+
+		docsCount := 0
+		storeSize := float64(0)
+
+		for _, stat := range matchingStats {
+			count, _ := strconv.Atoi(stat.DocsCount)
+			docsCount += count
+
+			size, _ := parseSize(stat.StoreSize)
+			storeSize += size
+
+			if stat.Health == "yellow" {
+				total.Health = "yellow"
+			} else if stat.Health == "red" {
+				total.Health = "red"
+				break
+			}
+		}
+
+		total.DocsCount = strconv.Itoa(docsCount)
+		total.StoreSize = formatSize(storeSize)
+
+		s.cache[pattern] = indexStatsCache{
+			stats: &total,
+		}
+	}
+
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*IndexStats, error) {
+	s.mu.RLock()
+	cached, ok := s.cache[indexPattern]
+	s.mu.RUnlock()
+
+	if ok {
+		return cached.stats, nil
+	}
+
+	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
+}
+
+func parseSize(size string) (float64, string) {
+	i := 0
+	for i < len(size) && (size[i] == '.' || size[i] == '-' || (size[i] >= '0' && size[i] <= '9')) {
+		i++
+	}
+
+	if i == 0 {
+		return 0, "b"
+	}
+
+	value, err := strconv.ParseFloat(size[:i], 64)
+	if err != nil {
+		return 0, "b"
+	}
+
+	unit := strings.ToLower(strings.TrimSpace(size[i:]))
+
+	switch unit {
+	case "kb":
+		return value * 1024, "kb"
+	case "mb":
+		return value * 1024 * 1024, "mb"
+	case "gb":
+		return value * 1024 * 1024 * 1024, "gb"
+	default:
+		return value, "b"
+	}
+}
+
+func formatSize(bytes float64) string {
+	units := []string{"b", "kb", "mb", "gb", "tb"}
+	var i int
+	value := bytes
+
+	for value > 1024 && i < len(units)-1 {
+		value /= 1024
+		i++
+	}
+
+	return fmt.Sprintf("%.1f%s", value, units[i])
+}
+
+func (s *Service) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache = nil
+	return nil
+}
+
+func (s *Service) RefreshIndexStats(ctx context.Context, indexPattern string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.PreloadIndexStats(ctx)
 }

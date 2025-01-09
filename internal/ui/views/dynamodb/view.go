@@ -26,6 +26,7 @@ var _ views.Reinitializer = (*View)(nil)
 
 type View struct {
 	name         string
+	content      *tview.Flex
 	manager      *manager.Manager
 	service      dynamodb.Interface
 	leftPanel    *tview.List
@@ -83,16 +84,15 @@ func (v *View) Name() string {
 }
 
 func (v *View) Content() tview.Primitive {
-	return v.layout
+	return v.content
 }
 
 func (v *View) Show() {
-	if v.state.leftPanelFilter != "" {
-		v.filterLeftPanel(v.state.leftPanelFilter)
-	} else {
+	v.manager.App().SetFocus(v.leftPanel)
+	// Only fetch if we need to
+	if v.leftPanel.GetItemCount() == 0 {
 		v.fetchTables()
 	}
-	v.manager.App().SetFocus(v.leftPanel)
 }
 
 func (v *View) Hide() {}
@@ -317,7 +317,10 @@ func (v *View) setupLayout() {
 		},
 	}
 
-	v.layout = v.manager.CreateLayout(layoutCfg)
+	v.content = v.manager.CreateLayout(layoutCfg).(*tview.Flex)
+	pages := v.manager.Pages()
+	pages.AddPage("dynamodb", v.content, true, true)
+
 	v.leftPanel = v.manager.GetPrimitiveByID("leftPanel").(*tview.List)
 	v.dataTable = v.manager.GetPrimitiveByID("dataTable").(*tview.Table)
 	v.dataTable.SetSelectable(true, false)
@@ -604,14 +607,12 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 	v.leftPanel.Clear()
 	v.dataTable.Clear()
 
-	v.initializeTableCache()
-
+	// Only initialize if we're the active view
 	if v.manager.ActiveView() == v.Content() {
 		v.manager.UpdateStatusBar("Fetching tables...")
+		v.initializeTableCache()
 	}
 
-	// Finally, call Show() or whatever you normally do to refresh
-	v.Show()
 	return nil
 }
 

@@ -12,11 +12,13 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/profile"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/region"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"strings"
 )
 
 const (
@@ -34,12 +36,14 @@ type Manager struct {
 	ctx            context.Context
 	cancelFunc     context.CancelFunc
 	views          map[string]views.View
+	lazyViews      map[string]func() (views.View, error)
 	activeView     views.View
 	pages          *tview.Pages
 	layout         *tview.Flex
 	awsConfig      aws.Config
 	primitivesByID map[string]tview.Primitive
 	logger         *logger.Logger
+	spinner        *spinner.Spinner
 
 	prompt       *components.Prompt
 	filterPrompt *components.Prompt
@@ -104,6 +108,28 @@ func (vm *Manager) setupLayout() {
 }
 
 func (vm *Manager) setupPrompts() {
+	vm.prompt.SetAutocompleteFunc(func(input string) []string {
+		if input == "" {
+			return nil
+		}
+		commands := []string{"profile", "region", "ec2", "dynamodb", "elastic", "test", "help", "exit"}
+		var matches []string
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, input) {
+				matches = append(matches, cmd)
+			}
+		}
+		return matches
+	})
+
+	vm.prompt.InputField.SetFieldBackgroundColor(tcell.ColorBlack)
+	vm.prompt.InputField.SetFieldTextColor(tcell.ColorBeige)
+
+	vm.prompt.SetAutocompleteStyles(
+		tcell.ColorBlack,
+		tcell.StyleDefault.Foreground(tcell.ColorBeige),
+		tcell.StyleDefault.Background(tcell.ColorDarkCyan).Foreground(tcell.ColorBeige))
+
 	vm.prompt.SetDoneFunc(func(command string) {
 		if newFocus := vm.handleCommand(command); newFocus != nil {
 			vm.pages.RemovePage(types.ModalCmdPrompt)
@@ -149,7 +175,6 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 	handlers := map[string]func() (tview.Primitive, error){
 		"profile":  vm.showProfileSelector,
 		"region":   vm.showRegionSelector,
-		"ec2":      func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewEC2) },
 		"dynamodb": func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewDynamoDB) },
 		"elastic":  func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewElastic) },
 		"test":     func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewTest) },
@@ -389,26 +414,40 @@ func (vm *Manager) RegisterView(view views.View) error {
 }
 
 func (vm *Manager) SwitchToView(name string) error {
-	view, exists := vm.views[name]
-	if !exists {
+	if vm.spinner == nil {
+		vm.logger.Info("Spinner not initialized in SwitchToView!")
+	}
+
+	vm.showLoading("Switching view...")
+	vm.UpdateHeader(nil)
+	if view, exists := vm.views[name]; exists {
+		// View already exists; switch directly
+		vm.logger.Debug("Switching to existing view", "view", name)
+		vm.setActiveView(view)
+	} else if constructor, exists := vm.lazyViews[name]; exists {
+		// Lazy view; construct it
+		vm.logger.Debug("Initializing lazy view", "view", name)
+		go func() {
+			view, err := constructor()
+			vm.App().QueueUpdateDraw(func() {
+				if err != nil {
+					vm.logger.Error("Failed to initialize lazy view", "view", name, "error", err)
+					vm.hideLoading()
+					return
+				}
+				vm.views[name] = view
+				vm.setActiveView(view)
+				vm.hideLoading()
+			})
+		}()
+	} else {
+		// View doesn't exist
+		vm.logger.Error("View not found", "view", name)
+		vm.hideLoading()
 		return fmt.Errorf("view %s not found", name)
 	}
 
-	if vm.activeView != nil {
-		vm.activeView.Hide()
-	}
-
-	vm.activeView = view
-	view.Show()
-
-	if !vm.pages.HasPage(name) {
-		vm.pages.AddPage(name, view.Content(), true, true)
-	}
-	vm.pages.SwitchToPage(name)
-	vm.header.ClearSummary()
-	vm.statusBar.SetText(fmt.Sprintf("Status: %s view active", name))
-	vm.header.SetTitle(fmt.Sprintf(" Cloud Cutter - %s ", name)).SetTitleColor(style.GruvboxMaterial.Yellow)
-
+	vm.logger.Info("SwitchToView completed successfully")
 	return nil
 }
 
@@ -812,4 +851,45 @@ func (vm *Manager) Help() *help.Help {
 
 func (vm *Manager) Logger() *logger.Logger {
 	return vm.logger
+}
+
+func (vm *Manager) RegisterLazyView(name string, constructor func() (views.View, error)) {
+	if vm.lazyViews == nil {
+		vm.lazyViews = make(map[string]func() (views.View, error))
+	}
+	vm.lazyViews[name] = constructor
+}
+
+func (vm *Manager) setActiveView(view views.View) {
+	if vm.activeView != nil {
+		vm.activeView.Hide()
+	}
+	vm.activeView = view
+	view.Show()
+	vm.pages.SwitchToPage(view.Name())
+}
+
+func (vm *Manager) showLoading(message string) {
+	if vm.spinner == nil {
+		vm.spinner = spinner.NewSpinner(message)
+		vm.spinner.SetOnComplete(func() {
+			pages := vm.Pages()
+			pages.RemovePage("loading")
+		})
+	} else {
+		vm.spinner.SetMessage(message)
+	}
+
+	if !vm.spinner.IsLoading() {
+		modal := spinner.CreateSpinnerModal(vm.spinner)
+		pages := vm.Pages()
+		pages.AddPage("loading", modal, true, true)
+		vm.spinner.Start(vm.App())
+	}
+}
+
+func (vm *Manager) hideLoading() {
+	if vm.spinner != nil {
+		vm.spinner.Stop()
+	}
 }

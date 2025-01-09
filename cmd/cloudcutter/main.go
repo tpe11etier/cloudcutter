@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 	"log"
 	"strings"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
 	awsservice "github.com/tpelletiersophos/cloudcutter/internal/services/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
 	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
@@ -42,21 +42,6 @@ func initializeServices(cfg aws.Config, region string) (*services.Services, erro
 	return services.New(cfg, region)
 }
 
-func initializeViews(viewManager *manager.Manager, services *services.Services, log *logger.Logger) error {
-	// Dynamically initialize views
-	dynamoView := ddbv.NewView(viewManager, services.DynamoDB)
-
-	eView, err := elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
-	if err != nil {
-		log.Error("Warning: Failed to initialize Elastic view: %v", err)
-	}
-
-	viewManager.RegisterView(eView)
-	viewManager.RegisterView(dynamoView)
-
-	return nil
-}
-
 func runApplication() {
 
 	ctx := context.Background()
@@ -66,7 +51,6 @@ func runApplication() {
 	logPrefix := "cloudcutter"
 	logLevel := strings.ToLower(viper.GetString("debug"))
 
-	// Parse the log level properly
 	level, err := logger.ParseLevel(logLevel)
 	if err != nil {
 		log.Fatalf("Invalid log level %q: %v", logLevel, err)
@@ -95,12 +79,16 @@ func runApplication() {
 		log.Fatalf("Failed to initialize services: %v", err)
 	}
 
-	if err := initializeViews(viewManager, services, logInstance); err != nil {
-		log.Fatalf("Failed to initialize views: %v", err)
-	}
+	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
+		return ddbv.NewView(viewManager, services.DynamoDB), nil
+	})
+
+	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
+		return elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
+	})
 
 	// Set initial view
-	if err := viewManager.SwitchToView(types.ViewElastic); err != nil {
+	if err := viewManager.SwitchToView(manager.ViewDynamoDB); err != nil {
 		log.Fatalf("Failed to set initial view: %v", err)
 	}
 
@@ -111,7 +99,6 @@ func runApplication() {
 }
 
 func main() {
-	// Execute the root command and handle errors
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Error: %v", err)
 	}

@@ -46,6 +46,9 @@ func NewHeader() *Header {
 		},
 	}
 
+	header.SetTitle("[::b] Cloud Cutter ").
+		SetTitleAlign(tview.AlignCenter).
+		SetTitleColor(style.GruvboxMaterial.Yellow)
 	header.SetBorder(true).SetBorderColor(tcell.ColorMediumTurquoise)
 	header.SetDirection(tview.FlexColumn).
 		AddItem(header.leftTable, 0, 1, false).
@@ -109,7 +112,8 @@ func (h *Header) UpdateSummary(items []types.SummaryItem) {
 	h.rightTable.SetCell(0, 0, tview.NewTableCell("   Summary").
 		SetTextColor(style.GruvboxMaterial.Yellow).
 		SetAlign(tview.AlignCenter).
-		SetSelectable(false))
+		SetSelectable(false).
+		SetAttributes(tcell.AttrBold))
 
 	if len(items) == 0 {
 		h.rightTable.SetCell(0, 0, tview.NewTableCell("No Summary Available").

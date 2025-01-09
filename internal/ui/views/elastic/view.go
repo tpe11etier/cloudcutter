@@ -88,6 +88,7 @@ type SearchState struct {
 	matchingIndices []string
 	numResults      int
 	timeframe       string
+	indexStats      *elastic.IndexStats
 }
 
 type MiscState struct {
@@ -814,7 +815,6 @@ func (v *View) showJSONModal(entry *DocEntry) {
 	if entry.Version != nil {
 		data["_version"] = *entry.Version
 	}
-
 	data["_source"] = entry.data
 
 	prettyJSON, err := json.MarshalIndent(data, "", "  ")
@@ -823,12 +823,13 @@ func (v *View) showJSONModal(entry *DocEntry) {
 		return
 	}
 
-	jsonStr := string(prettyJSON)
+	// Colorize the JSON
+	coloredJSON := colorizeJSON(string(prettyJSON))
 
 	textView := tview.NewTextView()
 	textView.SetTitle("'y' to copy | 'Esc' to close").
 		SetTitleColor(style.GruvboxMaterial.Yellow)
-	textView.SetText(jsonStr).
+	textView.SetText(coloredJSON).
 		SetDynamicColors(true).
 		SetRegions(true).
 		SetScrollable(true).
@@ -843,6 +844,8 @@ func (v *View) showJSONModal(entry *DocEntry) {
 		SetRows(0, 40, 0)
 
 	grid.AddItem(frame, 1, 1, 1, 1, 0, 0, true)
+
+	jsonStr := string(prettyJSON)
 
 	grid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -932,8 +935,30 @@ func (v *View) updateAvailableFields(results []*DocEntry) {
 }
 
 func (v *View) updateHeader() {
+	var indexInfo string
+	if v.state.search.indexStats != nil {
+		stats := v.state.search.indexStats
+		var healthColor = style.GruvboxMaterial.Red
+		switch stats.Health {
+		case "green":
+			healthColor = style.GruvboxMaterial.Green
+		case "yellow":
+			healthColor = style.GruvboxMaterial.Yellow
+		}
+
+		indexInfo = fmt.Sprintf("%s ([%s]%s[-]) | %s docs | %s",
+			v.state.search.currentIndex,
+			healthColor,
+			stats.Health,
+			stats.DocsCount,
+			stats.StoreSize,
+		)
+	} else {
+		indexInfo = v.state.search.currentIndex
+	}
+
 	summary := []types.SummaryItem{
-		{Key: "Index", Value: v.state.search.currentIndex},
+		{Key: "Index", Value: indexInfo},
 		{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
 		{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
 		{Key: "Page", Value: fmt.Sprintf("[%s::b]%d/%d[-]", style.GruvboxMaterial.Yellow, v.state.pagination.currentPage, v.state.pagination.totalPages)},
@@ -941,7 +966,6 @@ func (v *View) updateHeader() {
 	}
 	v.manager.UpdateHeader(summary)
 }
-
 func (v *View) displayFilteredResults(filterText string) {
 	if v.state.data.currentFilter == filterText {
 		return // Avoid refiltering if filter hasn't changed
@@ -1381,7 +1405,7 @@ func (v *View) refreshResults() {
 			if v.state.pagination.totalPages < 1 {
 				v.state.pagination.totalPages = 1
 			}
-
+			v.updateIndexStats()
 			v.displayCurrentPage()
 			v.updateHeader()
 
@@ -1681,4 +1705,66 @@ func (v *View) Close() error {
 		return v.manager.Logger().Close()
 	}
 	return nil
+}
+
+func (v *View) updateIndexStats() {
+	stats, err := v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
+	if err != nil {
+		// Try refreshing the stats once
+		if err := v.service.RefreshIndexStats(context.Background(), v.state.search.currentIndex); err != nil {
+			v.manager.Logger().Error("Failed to refresh index stats", "error", err)
+			return
+		}
+		// Try getting stats again
+		stats, err = v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
+		if err != nil {
+			v.manager.Logger().Error("Failed to get index stats after refresh", "error", err)
+			return
+		}
+	}
+	v.state.search.indexStats = stats
+}
+
+func colorizeJSON(jsonStr string) string {
+	lines := strings.Split(jsonStr, "\n")
+	var coloredLines []string
+
+	for _, line := range lines {
+		// Find the first double quote and colon to separate key and value
+		parts := strings.SplitN(line, ":", 2)
+
+		if len(parts) == 2 {
+			key := parts[0]
+			value := parts[1]
+
+			// Color the key
+			key = strings.ReplaceAll(key, `"`, fmt.Sprintf("[%s]\"[%s]", style.GruvboxMaterial.Blue, tcell.ColorReset))
+
+			// Color the value based on type
+			value = strings.TrimSpace(value)
+			switch {
+			case value == "null":
+				value = fmt.Sprintf("[%s]null[%s]", style.GruvboxMaterial.Red, tcell.ColorReset)
+			case value == "true" || value == "false":
+				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Purple, value, tcell.ColorReset)
+			case strings.HasPrefix(value, `"`): // String
+				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Green, value, tcell.ColorReset)
+			case strings.HasPrefix(value, "{") || strings.HasPrefix(value, "["):
+				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, value, tcell.ColorReset)
+			default: // Numbers
+				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Orange, value, tcell.ColorReset)
+			}
+
+			coloredLines = append(coloredLines, fmt.Sprintf("%s:%s", key, value))
+		} else {
+			// Handle lines that don't have key-value pairs (brackets, braces)
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "{" || trimmed == "}" || trimmed == "[" || trimmed == "]" || trimmed == "}," || trimmed == "]," {
+				line = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, line, tcell.ColorReset)
+			}
+			coloredLines = append(coloredLines, line)
+		}
+	}
+
+	return strings.Join(coloredLines, "\n")
 }
