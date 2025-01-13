@@ -36,7 +36,6 @@ type ESSearchHit struct {
 	Version *int64          `json:"_version,omitempty"`
 }
 
-// Custom UnmarshalJSON for ESTotal to handle both formats
 func (t *ESTotal) UnmarshalJSON(data []byte) error {
 	// First try to unmarshal as a simple number (ES6 and earlier)
 	var value int
@@ -59,7 +58,6 @@ func (t *ESTotal) UnmarshalJSON(data []byte) error {
 	return t.Validate()
 }
 
-// Helper function to get total hits regardless of format
 func (h *ESSearchHits) GetTotalHits() int {
 	return h.Total.Value
 }
