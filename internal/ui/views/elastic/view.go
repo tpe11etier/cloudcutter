@@ -1652,7 +1652,12 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 }
 
 func (v *View) buildQuery() map[string]any {
-	query := BuildQuery(v.state.data.filters, v.state.search.numResults)
+	query, err := BuildQuery(v.state.data.filters, v.state.search.numResults)
+	if err != nil {
+		v.manager.Logger().Error("Error building query", "error", err)
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))
+		return nil
+	}
 	return query
 }
 
