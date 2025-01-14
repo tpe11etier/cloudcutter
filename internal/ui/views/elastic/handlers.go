@@ -1,6 +1,7 @@
 package elastic
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
@@ -44,12 +45,11 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 		}
 		v.addFilter(filter)
 		v.components.filterInput.SetText("")
-		v.refreshResults()
+		v.refreshWithCurrentTimeframe()
 		return nil
 	}
 	return event
 }
-
 func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEsc:
@@ -72,21 +72,46 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEnter:
 		pattern := v.components.indexView.GetText()
-		if pattern != "" {
-			v.state.search.currentIndex = pattern
-
-			// Clear out old fields
-			v.state.data.originalFields = nil
-			v.state.data.fieldOrder = nil
-			v.state.data.activeFields = make(map[string]bool)
-			v.components.fieldList.Clear()
-			v.components.selectedList.Clear()
-
-			v.refreshResults()
+		if pattern == "" {
+			return nil
 		}
+
+		v.state.search.currentIndex = pattern
+
+		v.resetFieldState()
+
+		v.showLoading("Loading index stats...")
+
+		go func() {
+			// First update the stats
+			if err := v.service.PreloadIndexStats(context.Background()); err != nil {
+				v.manager.Logger().Error("Error refreshing index stats", err)
+				v.manager.UpdateStatusBar(fmt.Sprintf("Error refreshing index stats: %v", err))
+			}
+
+			stats, err := v.service.GetIndexStats(context.Background(), pattern)
+			if err != nil {
+				v.manager.Logger().Error("Failed to get index stats", "error", err)
+			}
+
+			v.manager.App().QueueUpdateDraw(func() {
+				v.state.search.indexStats = stats
+				v.hideLoading()
+				v.refreshWithCurrentTimeframe()
+			})
+		}()
+
 		return nil
 	}
 	return event
+}
+
+func (v *View) resetFieldState() {
+	v.state.data.originalFields = nil
+	v.state.data.fieldOrder = nil
+	v.state.data.activeFields = make(map[string]bool)
+	v.components.fieldList.Clear()
+	v.components.selectedList.Clear()
 }
 
 func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
@@ -107,7 +132,6 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 			go func() {
 				defer v.hideLoading()
 
-				// Query without source filtering to get the complete document
 				res, err := v.service.Client.Get(
 					entry.Index,
 					entry.ID,

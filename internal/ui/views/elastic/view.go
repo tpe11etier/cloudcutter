@@ -89,6 +89,7 @@ type SearchState struct {
 	numResults      int
 	timeframe       string
 	indexStats      *elastic.IndexStats
+	cancelCurrentOp context.CancelFunc
 }
 
 type MiscState struct {
@@ -144,6 +145,7 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 
 	// Setup layout and initialize fields
 	v.setupLayout()
+	v.initTimeframeState()
 	err := v.initFieldsSync()
 	if err != nil {
 		v.manager.Logger().Error("Failed to initialize fields", "error", err)
@@ -249,6 +251,13 @@ func (v *View) setupLayout() {
 									OnBlur: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorBeige)
 									},
+									DoneFunc: func(s string) {
+										if s != "" {
+											v.state.search.currentIndex = s
+											v.resetFieldState()
+											v.refreshWithCurrentTimeframe()
+										}
+									},
 								},
 								Help: getIndices(v),
 							},
@@ -280,7 +289,14 @@ func (v *View) setupLayout() {
 										inputField.SetBorderColor(tcell.ColorBeige)
 									},
 									DoneFunc: func(s string) {
-										v.refreshResults()
+										s = strings.TrimSpace(s)
+										if s != "" {
+											if _, err := ParseTimeframe(s); err != nil {
+												v.manager.UpdateStatusBar(fmt.Sprintf("Invalid timeframe: %v", err))
+												return
+											}
+										}
+										v.refreshWithCurrentTimeframe()
 									},
 								},
 								Help: []help.Command{
@@ -288,6 +304,11 @@ func (v *View) setupLayout() {
 									{Key: "24h", Description: "Last 24 hours"},
 									{Key: "7d", Description: "Last 7 days"},
 									{Key: "30d", Description: "Last 30 days"},
+									{Key: "today", Description: "Since start of day"},
+									{Key: "week", Description: "Last week"},
+									{Key: "month", Description: "Last month"},
+									{Key: "quarter", Description: "Last quarter"},
+									{Key: "year", Description: "Last year"},
 									{Key: "Enter", Description: "Apply timeframe"},
 								},
 							},
@@ -730,13 +751,49 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 		return nil
 	}
 
-	// Clear old state and UI
-	v.state.data.currentResults = nil
-	v.state.data.fieldOrder = nil
-	v.state.data.activeFields = make(map[string]bool)
-	v.state.data.filters = nil
+	// Clear all state and UI components
+	v.state = State{
+		pagination: PaginationState{
+			currentPage: 1,
+			pageSize:    50,
+			totalPages:  1,
+		},
+		ui: UIState{
+			showRowNumbers:  true,
+			isLoading:       false,
+			fieldListFilter: "",
+		},
+		data: DataState{
+			activeFields:     make(map[string]bool),
+			filters:          []string{},
+			currentResults:   []*DocEntry{},
+			fieldOrder:       []string{},
+			originalFields:   []string{},
+			fieldMatches:     []string{},
+			filteredResults:  []*DocEntry{},
+			displayedResults: []*DocEntry{},
+			columnCache:      make(map[string][]string),
+		},
+		search: SearchState{
+			currentIndex:    v.state.search.currentIndex,
+			matchingIndices: []string{},
+			numResults:      1000,
+			timeframe:       "12h",
+		},
+		misc: MiscState{
+			visibleRows:       0,
+			lastDisplayHeight: 0,
+			spinner:           nil,
+		},
+	}
+
+	// Clear UI components
 	v.components.fieldList.Clear()
+	v.components.selectedList.Clear()
 	v.components.resultsTable.Clear()
+	v.components.activeFilters.SetText("No active filters")
+	v.components.localFilterInput.SetText("")
+	v.components.filterInput.SetText("")
 
 	// Re-run initialization
 	if err := v.initFieldsSync(); err != nil {
@@ -1652,7 +1709,8 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 }
 
 func (v *View) buildQuery() map[string]any {
-	query, err := BuildQuery(v.state.data.filters, v.state.search.numResults)
+	timeframe := v.state.search.timeframe
+	query, err := BuildQuery(v.state.data.filters, v.state.search.numResults, timeframe)
 	if err != nil {
 		v.manager.Logger().Error("Error building query", "error", err)
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))
@@ -1715,12 +1773,6 @@ func (v *View) Close() error {
 func (v *View) updateIndexStats() {
 	stats, err := v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
 	if err != nil {
-		// Try refreshing the stats once
-		if err := v.service.RefreshIndexStats(context.Background(), v.state.search.currentIndex); err != nil {
-			v.manager.Logger().Error("Failed to refresh index stats", "error", err)
-			return
-		}
-		// Try getting stats again
 		stats, err = v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
 		if err != nil {
 			v.manager.Logger().Error("Failed to get index stats after refresh", "error", err)
@@ -1752,7 +1804,7 @@ func colorizeJSON(jsonStr string) string {
 				value = fmt.Sprintf("[%s]null[%s]", style.GruvboxMaterial.Red, tcell.ColorReset)
 			case value == "true" || value == "false":
 				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Purple, value, tcell.ColorReset)
-			case strings.HasPrefix(value, `"`): // String
+			case strings.HasPrefix(value, `"`):
 				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Green, value, tcell.ColorReset)
 			case strings.HasPrefix(value, "{") || strings.HasPrefix(value, "["):
 				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, value, tcell.ColorReset)
@@ -1762,7 +1814,6 @@ func colorizeJSON(jsonStr string) string {
 
 			coloredLines = append(coloredLines, fmt.Sprintf("%s:%s", key, value))
 		} else {
-			// Handle lines that don't have key-value pairs (brackets, braces)
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "{" || trimmed == "}" || trimmed == "[" || trimmed == "]" || trimmed == "}," || trimmed == "]," {
 				line = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, line, tcell.ColorReset)
@@ -1772,4 +1823,23 @@ func colorizeJSON(jsonStr string) string {
 	}
 
 	return strings.Join(coloredLines, "\n")
+}
+
+func (v *View) initTimeframeState() {
+	v.state.search.timeframe = ""
+
+	v.components.timeframeInput.SetText("12h")
+
+	v.refreshWithCurrentTimeframe()
+}
+
+func (v *View) refreshWithCurrentTimeframe() {
+	timeframe := strings.TrimSpace(v.components.timeframeInput.GetText())
+	// If timeframe is "12h" (the default) and hasn't been explicitly set, treat as empty
+	if timeframe == "12h" && v.state.search.timeframe == "" {
+		v.state.search.timeframe = ""
+	} else {
+		v.state.search.timeframe = timeframe
+	}
+	v.refreshResults()
 }

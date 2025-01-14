@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildQuery(t *testing.T) {
@@ -195,7 +196,7 @@ func TestBuildQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildQuery(tt.filters, tt.size)
+			got, err := BuildQuery(tt.filters, tt.size, "12h")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("BuildQuery() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -562,4 +563,380 @@ func TestHelperFunctions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseTimeframe(t *testing.T) {
+
+	tests := []struct {
+		name      string
+		timeframe string
+		want      time.Duration
+		wantErr   bool
+	}{
+		// Standard numeric durations
+		{
+			name:      "12 hours",
+			timeframe: "12h",
+			want:      12 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "24 hours",
+			timeframe: "24h",
+			want:      24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "7 days",
+			timeframe: "7d",
+			want:      7 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "1 week",
+			timeframe: "1w",
+			want:      7 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "30 days",
+			timeframe: "30d",
+			want:      30 * 24 * time.Hour,
+			wantErr:   false,
+		},
+
+		// Special keywords
+		//{
+		//	name:      "today keyword",
+		//	timeframe: "today",
+		//	want:      15*time.Hour + 30*time.Minute, // Since start of day (15:30 - 00:00)
+		//	wantErr:   false,
+		//},
+		{
+			name:      "week keyword",
+			timeframe: "week",
+			want:      7 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "month keyword",
+			timeframe: "month",
+			want:      30 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "quarter keyword",
+			timeframe: "quarter",
+			want:      90 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "year keyword",
+			timeframe: "year",
+			want:      365 * 24 * time.Hour,
+			wantErr:   false,
+		},
+
+		// Case variations
+		{
+			name:      "uppercase hour",
+			timeframe: "24H",
+			want:      24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "uppercase week keyword",
+			timeframe: "WEEK",
+			want:      7 * 24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "mixed case month",
+			timeframe: "MoNtH",
+			want:      30 * 24 * time.Hour,
+			wantErr:   false,
+		},
+
+		// Error cases
+		{
+			name:      "invalid unit",
+			timeframe: "24x",
+			wantErr:   true,
+		},
+		{
+			name:      "empty timeframe",
+			timeframe: "",
+			wantErr:   true,
+		},
+		{
+			name:      "invalid format",
+			timeframe: "abc",
+			wantErr:   true,
+		},
+		{
+			name:      "negative value",
+			timeframe: "-24h",
+			wantErr:   true,
+		},
+		{
+			name:      "invalid keyword",
+			timeframe: "fortnight",
+			wantErr:   true,
+		},
+		{
+			name:      "zero value",
+			timeframe: "0h",
+			wantErr:   false,
+			want:      0,
+		},
+
+		// Whitespace handling
+		{
+			name:      "leading space",
+			timeframe: " 24h",
+			want:      24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "trailing space",
+			timeframe: "24h ",
+			want:      24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "surrounding spaces",
+			timeframe: " 24h ",
+			want:      24 * time.Hour,
+			wantErr:   false,
+		},
+		{
+			name:      "spaces with keyword",
+			timeframe: " week ",
+			want:      7 * 24 * time.Hour,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseTimeframe(tt.timeframe)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseTimeframe(%q) error = %v, wantErr %v", tt.timeframe, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ParseTimeframe(%q) = %v, want %v", tt.timeframe, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTimeQuery(t *testing.T) {
+	// Fixed time for consistent testing
+	fixedTime := time.Date(2024, 10, 4, 1, 0, 17, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		timeframe string
+		now       time.Time
+		want      map[string]interface{}
+		wantErr   bool
+	}{
+		{
+			name:      "12 hour timeframe",
+			timeframe: "12h",
+			now:       fixedTime,
+			want: map[string]interface{}{
+				"bool": map[string]interface{}{
+					"should": []map[string]interface{}{
+						{
+							"range": map[string]interface{}{
+								"unixTime": map[string]interface{}{
+									"gte": int64(1728003617 - (12 * 3600)),
+									"lte": int64(1728003617),
+								},
+							},
+						},
+						{
+							"range": map[string]interface{}{
+								"detectionGeneratedTime": map[string]interface{}{
+									"gte": int64(1728003617000 - (12 * 3600 * 1000)),
+									"lte": int64(1728003617000),
+								},
+							},
+						},
+					},
+					"minimum_should_match": 1,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:      "week keyword",
+			timeframe: "week",
+			now:       fixedTime,
+			want: map[string]interface{}{
+				"bool": map[string]interface{}{
+					"should": []map[string]interface{}{
+						{
+							"range": map[string]interface{}{
+								"unixTime": map[string]interface{}{
+									"gte": int64(1728003617 - (7 * 24 * 3600)),
+									"lte": int64(1728003617),
+								},
+							},
+						},
+						{
+							"range": map[string]interface{}{
+								"detectionGeneratedTime": map[string]interface{}{
+									"gte": int64(1728003617000 - (7 * 24 * 3600 * 1000)),
+									"lte": int64(1728003617000),
+								},
+							},
+						},
+					},
+					"minimum_should_match": 1,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:      "empty timeframe",
+			timeframe: "",
+			now:       fixedTime,
+			want:      nil,
+			wantErr:   false,
+		},
+		{
+			name:      "invalid timeframe",
+			timeframe: "invalid",
+			now:       fixedTime,
+			wantErr:   true,
+		},
+		//{
+		//	name:      "today keyword",
+		//	timeframe: "today",
+		//	now:       fixedTime,
+		//	want: map[string]interface{}{
+		//		"bool": map[string]interface{}{
+		//			"should": []map[string]interface{}{
+		//				{
+		//					"range": map[string]interface{}{
+		//						"unixTime": map[string]interface{}{
+		//							"gte": int64(1728003617 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Seconds())),
+		//							"lte": int64(1728003617),
+		//						},
+		//					},
+		//				},
+		//				{
+		//					"range": map[string]interface{}{
+		//						"detectionGeneratedTime": map[string]interface{}{
+		//							"gte": int64(1728003617000 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Milliseconds())),
+		//							"lte": int64(1728003617000),
+		//						},
+		//					},
+		//				},
+		//			},
+		//			"minimum_should_match": 1,
+		//		},
+		//	},
+		//	wantErr: false,
+		//},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildTimeQuery(tt.timeframe, tt.now)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BuildTimeQuery(%q) error = %v, wantErr %v", tt.timeframe, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !compareMaps(got, tt.want) {
+				gotJSON, _ := json.MarshalIndent(got, "", "  ")
+				wantJSON, _ := json.MarshalIndent(tt.want, "", "  ")
+				t.Errorf("BuildTimeQuery(%q) =\n%s\nwant\n%s", tt.timeframe, gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
+// Helper function to compare nested maps
+func compareMaps(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v1 := range a {
+		v2, ok := b[k]
+		if !ok {
+			return false
+		}
+
+		switch val1 := v1.(type) {
+		case map[string]interface{}:
+			val2, ok := v2.(map[string]interface{})
+			if !ok || !compareMaps(val1, val2) {
+				return false
+			}
+		case []interface{}:
+			val2, ok := v2.([]interface{})
+			if !ok || !compareSlices(val1, val2) {
+				return false
+			}
+		case []map[string]interface{}: // Add specific case for slice of maps
+			val2, ok := v2.([]map[string]interface{})
+			if !ok || !compareSliceOfMaps(val1, val2) {
+				return false
+			}
+		default:
+			if v1 != v2 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Helper function to compare slices
+func compareSlices(a, b []interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		switch val1 := a[i].(type) {
+		case map[string]interface{}:
+			val2, ok := b[i].(map[string]interface{})
+			if !ok || !compareMaps(val1, val2) {
+				return false
+			}
+		case []interface{}:
+			val2, ok := b[i].([]interface{})
+			if !ok || !compareSlices(val1, val2) {
+				return false
+			}
+		case []map[string]interface{}: // Add specific case for slice of maps
+			val2, ok := b[i].([]map[string]interface{})
+			if !ok || !compareSliceOfMaps(val1, val2) {
+				return false
+			}
+		default:
+			if a[i] != b[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Helper function specifically for comparing slices of maps
+func compareSliceOfMaps(a, b []map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !compareMaps(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
