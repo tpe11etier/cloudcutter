@@ -21,7 +21,7 @@ import (
 
 type Service struct {
 	Client *elasticsearch.Client
-	cache  map[string]indexStatsCache
+	cache  map[string]*IndexStats
 	mu     sync.RWMutex
 }
 
@@ -61,7 +61,7 @@ func NewService(cfg aws.Config) (*Service, error) {
 	}
 	s := &Service{
 		Client: client,
-		cache:  make(map[string]indexStatsCache),
+		cache:  make(map[string]*IndexStats),
 		mu:     sync.RWMutex{},
 	}
 
@@ -238,98 +238,6 @@ type IndexStats struct {
 	PriStoreSize string `json:"pri.store.size"`
 }
 
-type indexStatsCache struct {
-	stats *IndexStats
-}
-
-func (s *Service) PreloadIndexStats(ctx context.Context) error {
-	// Get all indices stats in one request
-	res, err := s.Client.Cat.Indices(
-		s.Client.Cat.Indices.WithContext(ctx),
-		s.Client.Cat.Indices.WithFormat("json"),
-		s.Client.Cat.Indices.WithH("health,status,index,uuid,pri,rep,docs.count,docs.deleted,store.size,pri.store.size"),
-		s.Client.Cat.Indices.WithV(true),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to preload index stats: %w", err)
-	}
-	defer res.Body.Close()
-
-	var stats []IndexStats
-	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
-		return fmt.Errorf("failed to decode index stats: %w", err)
-	}
-
-	// Clear existing cache and populate with new stats
-	s.mu.Lock()
-	s.cache = make(map[string]indexStatsCache)
-
-	for _, stat := range stats {
-		s.cache[stat.Index] = indexStatsCache{
-			stats: &stat,
-		}
-	}
-
-	patterns := make(map[string][]IndexStats)
-	for _, stat := range stats {
-		// Extract pattern from index name (e.g., "main-summary-*" from "main-summary-2024.01.08")
-		parts := strings.Split(stat.Index, "-")
-		if len(parts) >= 2 {
-			pattern := strings.Join(parts[:2], "-") + "-*"
-			patterns[pattern] = append(patterns[pattern], stat)
-		}
-	}
-
-	// Calculate aggregated stats for patterns
-	for pattern, matchingStats := range patterns {
-		total := IndexStats{
-			Health: "green",
-			Status: "open",
-			Index:  pattern,
-		}
-
-		docsCount := 0
-		storeSize := float64(0)
-
-		for _, stat := range matchingStats {
-			count, _ := strconv.Atoi(stat.DocsCount)
-			docsCount += count
-
-			size, _ := parseSize(stat.StoreSize)
-			storeSize += size
-
-			if stat.Health == "yellow" {
-				total.Health = "yellow"
-			} else if stat.Health == "red" {
-				total.Health = "red"
-				break
-			}
-		}
-
-		total.DocsCount = strconv.Itoa(docsCount)
-		total.StoreSize = formatSize(storeSize)
-
-		s.cache[pattern] = indexStatsCache{
-			stats: &total,
-		}
-	}
-
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*IndexStats, error) {
-	s.mu.RLock()
-	cached, ok := s.cache[indexPattern]
-	s.mu.RUnlock()
-
-	if ok {
-		return cached.stats, nil
-	}
-
-	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
-}
-
 func parseSize(size string) (float64, string) {
 	i := 0
 	for i < len(size) && (size[i] == '.' || size[i] == '-' || (size[i] >= '0' && size[i] <= '9')) {
@@ -379,9 +287,141 @@ func (s *Service) Close() error {
 	return nil
 }
 
-func (s *Service) RefreshIndexStats(ctx context.Context, indexPattern string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Service) PreloadIndexStats(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-	return s.PreloadIndexStats(ctx)
+	res, err := s.Client.Cat.Indices(
+		s.Client.Cat.Indices.WithContext(ctx),
+		s.Client.Cat.Indices.WithFormat("json"),
+		s.Client.Cat.Indices.WithH("health,status,index,uuid,pri,rep,docs.count,docs.deleted,store.size,pri.store.size"),
+		s.Client.Cat.Indices.WithV(true),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to preload index stats: %w", err)
+	}
+	defer res.Body.Close()
+
+	var stats []IndexStats
+	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
+		return fmt.Errorf("failed to decode index stats: %w", err)
+	}
+
+	newCache := make(map[string]*IndexStats)
+
+	// store all concrete indices
+	for _, stat := range stats {
+		newCache[stat.Index] = &stat
+	}
+
+	// Then handle patterns by finding all matching indices
+	patternGroups := make(map[string][]string)
+	for _, stat := range stats {
+		for existingIndex := range newCache {
+			// If this index matches any known pattern, add it to that group
+			if strings.Contains(existingIndex, "*") {
+				pattern := strings.TrimSuffix(existingIndex, "*")
+				if strings.HasPrefix(stat.Index, pattern) {
+					patternGroups[existingIndex] = append(patternGroups[existingIndex], stat.Index)
+				}
+			}
+		}
+	}
+
+	for pattern, matchingIndices := range patternGroups {
+		total := &IndexStats{
+			Health: "green",
+			Status: "open",
+			Index:  pattern,
+		}
+
+		var totalDocs int64
+		var totalSize float64
+
+		for _, indexName := range matchingIndices {
+			if stat := newCache[indexName]; stat != nil {
+				if stat.Health == "yellow" && total.Health == "green" {
+					total.Health = "yellow"
+				} else if stat.Health == "red" {
+					total.Health = "red"
+				}
+
+				// sum up docs
+				if docs, err := strconv.ParseInt(stat.DocsCount, 10, 64); err == nil {
+					totalDocs += docs
+				}
+
+				// Sum up size
+				if size, _ := parseSize(stat.StoreSize); size > 0 {
+					totalSize += size
+				}
+			}
+		}
+
+		total.DocsCount = strconv.FormatInt(totalDocs, 10)
+		total.StoreSize = formatSize(totalSize)
+
+		newCache[pattern] = total
+	}
+
+	s.mu.Lock()
+	s.cache = newCache
+	s.mu.Unlock()
+
+	return nil
+}
+
+func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*IndexStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// try exact match first
+	if stats, ok := s.cache[indexPattern]; ok {
+		return stats, nil
+	}
+
+	if strings.Contains(indexPattern, "*") {
+		pattern := strings.TrimSuffix(indexPattern, "*")
+
+		var matchingStats []*IndexStats
+		for indexName, stats := range s.cache {
+			if strings.HasPrefix(indexName, pattern) && !strings.Contains(indexName, "*") {
+				matchingStats = append(matchingStats, stats)
+			}
+		}
+
+		if len(matchingStats) > 0 {
+			total := &IndexStats{
+				Health: "green",
+				Status: "open",
+				Index:  indexPattern,
+			}
+
+			var totalDocs int64
+			var totalSize float64
+
+			for _, stat := range matchingStats {
+				if stat.Health == "yellow" && total.Health == "green" {
+					total.Health = "yellow"
+				} else if stat.Health == "red" {
+					total.Health = "red"
+				}
+
+				if docs, err := strconv.ParseInt(stat.DocsCount, 10, 64); err == nil {
+					totalDocs += docs
+				}
+
+				if size, _ := parseSize(stat.StoreSize); size > 0 {
+					totalSize += size
+				}
+			}
+
+			total.DocsCount = strconv.FormatInt(totalDocs, 10)
+			total.StoreSize = formatSize(totalSize)
+
+			return total, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
 }

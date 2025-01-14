@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -25,50 +26,60 @@ func (e *ParseError) Error() string {
 }
 
 // BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
-func BuildQuery(filters []string, size int) (map[string]any, error) {
+func BuildQuery(filters []string, size int, timeframe string) (map[string]any, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("size must be non-negative, got %d", size)
 	}
 
-	// Initialize the query map
-	query := make(map[string]any)
+	// We'll store timeframe + any user filters in mustClauses
+	var mustClauses []map[string]any
 
-	// If no filters, match all
-	if len(filters) == 0 {
-		query["query"] = map[string]any{
-			"match_all": map[string]any{},
+	// If timeframe is set, build a timeframe clause
+	if timeframe != "" {
+		timeQuery, err := BuildTimeQuery(timeframe, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("error building time query: %v", err)
 		}
-		query["size"] = size
-		return query, nil
+		if timeQuery != nil {
+			mustClauses = append(mustClauses, timeQuery)
+		}
 	}
 
-	var mustClauses []map[string]any
-	var errors []string
-
+	// Process user filters
+	var parseErrors []string
 	for i, f := range filters {
 		clause, err := ParseFilter(f)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("filter[%d]: %v", i, err))
+			parseErrors = append(parseErrors, fmt.Sprintf("filter[%d]: %v", i, err))
 			continue
 		}
 		if clause != nil {
 			mustClauses = append(mustClauses, clause)
 		}
 	}
-
-	if len(errors) > 0 {
-		return nil, fmt.Errorf("failed to parse filters: %s", strings.Join(errors, "; "))
+	if len(parseErrors) > 0 {
+		return nil, fmt.Errorf("failed to parse filters: %s", strings.Join(parseErrors, "; "))
 	}
 
-	boolQuery := make(map[string]any)
-	boolQuery["must"] = mustClauses
-
-	query["query"] = map[string]any{
-		"bool": boolQuery,
+	// If we ended up with zero clauses (no timeframe, no filters), match all
+	if len(mustClauses) == 0 {
+		return map[string]any{
+			"query": map[string]any{
+				"match_all": map[string]any{},
+			},
+			"size": size,
+		}, nil
 	}
-	query["size"] = size
 
-	return query, nil
+	// Otherwise, build a bool query with everything in "must"
+	return map[string]any{
+		"query": map[string]any{
+			"bool": map[string]any{
+				"must": mustClauses,
+			},
+		},
+		"size": size,
+	}, nil
 }
 
 // ParseFilter parses a single filter with comprehensive error handling
@@ -329,4 +340,96 @@ func unescapeValue(value string) string {
 	}
 
 	return result.String()
+}
+
+// ParseTimeframe converts a timeframe string (e.g., "12h", "7d") to time.Duration
+func ParseTimeframe(timeframe string) (time.Duration, error) {
+	timeframe = strings.TrimSpace(strings.ToLower(timeframe))
+	if timeframe == "" {
+		return 0, fmt.Errorf("empty timeframe")
+	}
+
+	// Handle special keywords
+	switch timeframe {
+	case "today":
+		now := time.Now()
+		// Set startOfDay to midnight, so the duration is how long it’s been since 00:00
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		return now.Sub(startOfDay), nil
+	case "week":
+		return 7 * 24 * time.Hour, nil
+	case "month":
+		return 30 * 24 * time.Hour, nil
+	case "quarter":
+		return 90 * 24 * time.Hour, nil
+	case "year":
+		return 365 * 24 * time.Hour, nil
+	}
+
+	// Parse numeric value with unit
+	length := len(timeframe)
+	if length < 2 {
+		return 0, fmt.Errorf("invalid timeframe format: %s", timeframe)
+	}
+
+	value, err := strconv.Atoi(timeframe[:length-1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid timeframe number: %s", timeframe)
+	}
+
+	if value < 0 {
+		return 0, fmt.Errorf("timeframe cannot be negative: %s", timeframe)
+	}
+
+	// Get the unit
+	unit := timeframe[length-1:]
+	switch unit {
+	case "h", "H":
+		return time.Duration(value) * time.Hour, nil
+	case "d", "D":
+		return time.Duration(value) * 24 * time.Hour, nil
+	case "w", "W":
+		return time.Duration(value) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("invalid timeframe unit: %s (supported: h,d,w)", unit)
+	}
+}
+
+// BuildTimeQuery creates an Elasticsearch time range query based on the timeframe
+func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, error) {
+	if timeframe == "" {
+		return nil, nil
+	}
+
+	duration, err := ParseTimeframe(timeframe)
+	if err != nil {
+		return nil, err
+	}
+
+	unixTime := now.Unix()
+	unixTimeMs := now.UnixMilli()
+
+	return map[string]interface{}{
+		"bool": map[string]interface{}{
+			"should": []map[string]interface{}{
+				{
+					"range": map[string]interface{}{
+						"unixTime": map[string]interface{}{
+							"gte": unixTime - int64(duration.Seconds()),
+							"lte": unixTime,
+						},
+					},
+				},
+				{
+					"range": map[string]interface{}{
+						"detectionGeneratedTime": map[string]interface{}{
+							"gte": unixTimeMs - int64(duration.Milliseconds()),
+							"lte": unixTimeMs,
+						},
+					},
+				},
+			},
+			"minimum_should_match": 1,
+		},
+	}, nil
 }
