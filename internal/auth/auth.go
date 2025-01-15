@@ -124,7 +124,7 @@ func (a *Authenticator) runOpalCommand(ctx context.Context, roleID, profileName 
 
 		if strings.Contains(output, "Enter your email") ||
 			strings.Contains(output, "session is invalid or expired") {
-			return fmt.Errorf("Opal session expired. Please run 'opal-%s' in terminal first", profileName)
+			return fmt.Errorf("opal session expired. Please run '%s' in terminal first", profileName)
 		}
 
 		return fmt.Errorf("Opal command failed: %v\nOutput: %s", err, output)

@@ -1,0 +1,48 @@
+name: Main Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+# Cancel in-progress jobs or runs for the current workflow
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-security-check:
+    name: Dependency security check
+    runs-on: ubuntu-latest
+    container: golang:1.23.4-alpine3.21
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Download nancy
+        run: wget https://github.com/sonatype-nexus-community/nancy/releases/download/v1.0.22/nancy_1.0.22_linux_amd64.apk
+
+      - name: Install nancy
+        run: apk add --allow-untrusted ./nancy_1.0.22_linux_amd64.apk
+
+      - name: Run nancy
+        run: go list -json -m all | nancy sleuth
+
+  unit-race-condition-tests:
+    name: Unit test with race detection
+    runs-on: ubuntu-latest
+    container: golang:1.23.4-alpine3.21
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install make
+        run: apk add make
+
+      - name: Install gcc required by race tests
+        run: apk add build-base
+
+      - name: Run unit tests
+        run: make test-unit

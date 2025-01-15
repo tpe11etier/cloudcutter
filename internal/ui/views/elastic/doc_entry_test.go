@@ -2,6 +2,7 @@ package elastic_test
 
 import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
+	"sync"
 	"testing"
 )
 
@@ -163,4 +164,30 @@ func TestGetFormattedValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocEntry_ConcurrentAccess(t *testing.T) {
+	doc, err := elastic.NewDocEntry(
+		[]byte(`{"field1":"value1","nested":{"inner":"value2"},"list":[{"key":"value3"}]}`),
+		"1", "index", "type", nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("Failed to create DocEntry: %v", err)
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			value := doc.GetValue("nested.inner")
+			if value != "value2" {
+				t.Errorf("Goroutine %d: Expected value 'value2', got %v", i, value)
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
