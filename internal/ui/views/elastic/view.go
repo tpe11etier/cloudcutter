@@ -16,6 +16,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"sync"
 
 	"io"
 	"math"
@@ -56,6 +57,7 @@ type State struct {
 	data       DataState
 	search     SearchState
 	misc       MiscState
+	mu         sync.RWMutex
 }
 
 type PaginationState struct {
@@ -636,13 +638,6 @@ func (v *View) addFilter(filter string) {
 		return
 	}
 
-	// Validate the filter using ParseFilter
-	_, err := ParseFilter(filter)
-	if err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
-		return
-	}
-
 	// Check for duplicates
 	for _, existing := range v.state.data.filters {
 		if existing == filter {
@@ -652,8 +647,6 @@ func (v *View) addFilter(filter string) {
 
 	v.state.data.filters = append(v.state.data.filters, filter)
 	v.updateFiltersDisplay()
-	v.refreshResults()
-	v.updateHeader()
 }
 
 func (v *View) deleteFilterByIndex(index int) {
@@ -1037,32 +1030,41 @@ func (v *View) updateHeader() {
 	}
 	v.manager.UpdateHeader(summary)
 }
+
 func (v *View) displayFilteredResults(filterText string) {
+	v.state.mu.Lock()
 	if v.state.data.currentFilter == filterText {
-		return // Avoid refiltering if filter hasn't changed
+		v.state.mu.Unlock()
+		return
 	}
 	v.state.data.currentFilter = filterText
 
-	// Reset display state
+	// Work with copies while holding the lock
+	currentResults := make([]*DocEntry, len(v.state.data.filteredResults))
+	copy(currentResults, v.state.data.filteredResults)
+	v.state.mu.Unlock()
+
+	// Process without holding the lock
+	var filtered []*DocEntry
 	if filterText == "" {
-		v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
+		filtered = currentResults
 	} else {
 		filterText = strings.ToLower(filterText)
-		filtered := make([]*DocEntry, 0, len(v.state.data.filteredResults))
-
-		for _, entry := range v.state.data.filteredResults {
+		filtered = make([]*DocEntry, 0, len(currentResults))
+		for _, entry := range currentResults {
 			if v.entryMatchesFilter(entry, filterText) {
 				filtered = append(filtered, entry)
 			}
 		}
-		v.state.data.displayedResults = filtered
 	}
 
+	// Update state with results
+	v.state.mu.Lock()
+	v.state.data.displayedResults = filtered
 	v.state.pagination.currentPage = 1
-	totalResults := len(v.state.data.displayedResults)
-	v.state.pagination.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pagination.pageSize)))
+	v.state.pagination.totalPages = int(math.Ceil(float64(len(filtered)) / float64(v.state.pagination.pageSize)))
+	v.state.mu.Unlock()
 
-	// Update display
 	v.displayCurrentPage()
 }
 
@@ -1280,9 +1282,14 @@ func (v *View) moveFieldInOrder(field string, isActive bool) {
 }
 
 func (v *View) showLoading(message string) {
+	v.state.mu.Lock()
+	defer v.state.mu.Unlock()
+
 	if v.state.misc.spinner == nil {
 		v.state.misc.spinner = spinner.NewSpinner(message)
 		v.state.misc.spinner.SetOnComplete(func() {
+			v.state.mu.Lock()
+			defer v.state.mu.Unlock()
 			pages := v.manager.Pages()
 			pages.RemovePage("loading")
 		})
@@ -1400,90 +1407,6 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 	promptLayout := v.components.filterPrompt.Layout()
 	v.manager.Pages().AddPage(types.ModalFilter, promptLayout, true, true)
 	v.manager.App().SetFocus(v.components.filterPrompt.InputField)
-}
-
-func (v *View) refreshResults() {
-	v.manager.Logger().Info("Starting results refresh",
-		"isLoading", v.state.ui.isLoading,
-		"currentIndex", v.state.search.currentIndex,
-		"numResults", v.state.search.numResults)
-
-	if v.state.ui.isLoading {
-		v.manager.Logger().Info("Skipping refresh - already loading")
-		return
-	}
-	currentFocus := v.manager.App().GetFocus()
-	v.showLoading("Refreshing results")
-	v.state.ui.isLoading = true
-	v.manager.Logger().Info("Refreshing results", "currentIndex", v.state.search.currentIndex)
-
-	go func() {
-		defer func() {
-			v.state.ui.isLoading = false
-			v.hideLoading()
-			v.manager.App().QueueUpdateDraw(func() {
-				v.manager.App().SetFocus(currentFocus)
-			})
-		}()
-
-		var results []*DocEntry
-		var err error
-		var totalHits int
-
-		// Use scroll API if we expect more than 10k results
-		if v.state.search.numResults > 10000 {
-			v.manager.Logger().Debug("Fetching large result set")
-			results, err = v.fetchLargeResultSet()
-			if err != nil {
-				v.manager.Logger().Error("Error fetching results", "error", err)
-				v.manager.App().QueueUpdateDraw(func() {
-					v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching results: %v", err))
-				})
-				return
-			}
-			totalHits = len(results)
-		} else {
-			query := v.buildQuery()
-			query["size"] = v.state.search.numResults
-
-			result, err := v.executeSearch(query)
-			if err != nil {
-				v.manager.App().QueueUpdateDraw(func() {
-					v.manager.UpdateStatusBar(fmt.Sprintf("Search error: %v", err))
-				})
-				return
-			}
-
-			totalHits = result.Hits.Total.Value
-			results, err = v.processSearchResults(result.Hits.Hits)
-			if err != nil {
-				v.manager.Logger().Error("Error processing results", "error", err)
-				v.manager.App().QueueUpdateDraw(func() {
-					v.manager.UpdateStatusBar(fmt.Sprintf("Error processing results: %v", err))
-				})
-				return
-			}
-		}
-
-		v.manager.Logger().Info("Results refreshed successfully", "totalResults", len(results))
-		v.manager.App().QueueUpdateDraw(func() {
-			v.updateAvailableFields(results)
-
-			v.state.data.filteredResults = results
-			v.state.data.displayedResults = append([]*DocEntry(nil), results...)
-
-			v.state.pagination.totalPages = int(math.Ceil(float64(len(results)) / float64(v.state.pagination.pageSize)))
-			if v.state.pagination.totalPages < 1 {
-				v.state.pagination.totalPages = 1
-			}
-			v.updateIndexStats()
-			v.displayCurrentPage()
-			v.updateHeader()
-
-			v.manager.UpdateStatusBar(fmt.Sprintf("Found %d results total (displaying %d)",
-				totalHits, len(results)))
-		})
-	}()
 }
 
 func (v *View) processSearchResults(hits []elastic.ESSearchHit) ([]*DocEntry, error) {
@@ -1723,8 +1646,14 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 }
 
 func (v *View) buildQuery() map[string]any {
+	v.state.mu.RLock()
+	filters := make([]string, len(v.state.data.filters))
+	copy(filters, v.state.data.filters)
 	timeframe := v.state.search.timeframe
-	query, err := BuildQuery(v.state.data.filters, v.state.search.numResults, timeframe)
+	numResults := v.state.search.numResults
+	v.state.mu.RUnlock()
+
+	query, err := BuildQuery(filters, numResults, timeframe)
 	if err != nil {
 		v.manager.Logger().Error("Error building query", "error", err)
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))
@@ -1856,4 +1785,189 @@ func (v *View) doRefreshWithCurrentTimeframe() {
 		v.state.search.timeframe = timeframe
 	}
 	v.refreshResults()
+}
+
+// searchResult wraps our internal search results
+type searchResult struct {
+	entries   []*DocEntry
+	totalHits int
+}
+
+// fetchResults handles both regular and large result set fetching
+func (v *View) fetchResults() (*searchResult, error) {
+	// Build query with read lock since it accesses shared state
+	v.state.mu.RLock()
+	numResults := v.state.search.numResults
+	query := v.buildQuery()
+	currentIndex := v.state.search.currentIndex
+	v.state.mu.RUnlock()
+
+	if numResults > 10000 {
+		return v.fetchLargeResults(query, currentIndex)
+	}
+	return v.fetchRegularResults(query, numResults, currentIndex)
+}
+
+// fetchRegularResults handles normal-sized result sets
+func (v *View) fetchRegularResults(query map[string]any, numResults int, index string) (*searchResult, error) {
+	query["size"] = numResults
+
+	queryJSON, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling query: %v", err)
+	}
+
+	res, err := v.service.Client.Search(
+		v.service.Client.Search.WithIndex(index),
+		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search error: %v", err)
+	}
+	defer res.Body.Close()
+
+	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+
+	var result elastic.ESSearchResult
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+
+	entries, err := v.processSearchResults(result.Hits.Hits)
+	if err != nil {
+		return nil, fmt.Errorf("error processing results: %v", err)
+	}
+
+	return &searchResult{
+		entries:   entries,
+		totalHits: result.Hits.GetTotalHits(),
+	}, nil
+}
+
+// fetchLargeResults handles result sets larger than 10k using scroll API
+func (v *View) fetchLargeResults(query map[string]any, index string) (*searchResult, error) {
+	query["size"] = 1000 // Standard batch size for scroll
+
+	queryJSON, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("error creating query: %v", err)
+	}
+
+	// Initial scroll request
+	res, err := v.service.Client.Search(
+		v.service.Client.Search.WithIndex(index),
+		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
+		v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initial scroll error: %v", err)
+	}
+	defer res.Body.Close()
+
+	var allResults []*DocEntry
+
+	for {
+		bodyBytes, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error reading response: %v", err)
+		}
+
+		var result elastic.ESSearchResult
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+
+		if len(result.Hits.Hits) == 0 {
+			// Clean up scroll when done
+			_, err = v.service.Client.ClearScroll(
+				v.service.Client.ClearScroll.WithScrollID(result.ScrollID),
+			)
+			if err != nil {
+				v.manager.Logger().Error("Failed to clear scroll", "error", err)
+			}
+			break
+		}
+
+		entries, err := v.processSearchResults(result.Hits.Hits)
+		if err != nil {
+			return nil, fmt.Errorf("error processing batch: %v", err)
+		}
+		allResults = append(allResults, entries...)
+
+		// Get next batch
+		res, err = v.service.Client.Scroll(
+			v.service.Client.Scroll.WithScrollID(result.ScrollID),
+			v.service.Client.Scroll.WithScroll(time.Duration(5)*time.Minute),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scroll error: %v", err)
+		}
+	}
+
+	return &searchResult{
+		entries:   allResults,
+		totalHits: len(allResults),
+	}, nil
+}
+
+// refreshResults is now simplified to use fetchResults
+func (v *View) refreshResults() {
+	v.state.mu.Lock()
+	if v.state.ui.isLoading {
+		v.state.mu.Unlock()
+		return
+	}
+	v.state.ui.isLoading = true
+	v.state.mu.Unlock()
+
+	currentFocus := v.manager.App().GetFocus()
+	v.showLoading("Refreshing results")
+
+	go func() {
+		defer func() {
+			v.state.mu.Lock()
+			v.state.ui.isLoading = false
+			v.state.mu.Unlock()
+			v.hideLoading()
+			v.manager.App().QueueUpdateDraw(func() {
+				v.manager.App().SetFocus(currentFocus)
+			})
+		}()
+
+		searchResult, err := v.fetchResults()
+		if err != nil {
+			v.manager.Logger().Error("Error fetching results", "error", err)
+			v.manager.App().QueueUpdateDraw(func() {
+				v.manager.UpdateStatusBar(fmt.Sprintf("Error: %v", err))
+			})
+			return
+		}
+
+		v.manager.Logger().Info("Results refreshed successfully",
+			"totalResults", len(searchResult.entries))
+
+		// Update all state under a single lock
+		v.state.mu.Lock()
+		v.updateAvailableFields(searchResult.entries)
+		v.state.data.filteredResults = searchResult.entries
+		v.state.data.displayedResults = append([]*DocEntry(nil), searchResult.entries...)
+		v.state.pagination.totalPages = int(math.Ceil(float64(len(searchResult.entries)) /
+			float64(v.state.pagination.pageSize)))
+		if v.state.pagination.totalPages < 1 {
+			v.state.pagination.totalPages = 1
+		}
+		v.state.mu.Unlock()
+
+		// Queue UI updates
+		v.manager.App().QueueUpdateDraw(func() {
+			v.updateIndexStats()
+			v.displayCurrentPage()
+			v.updateHeader()
+			v.manager.UpdateStatusBar(fmt.Sprintf("Found %d results total (displaying %d)",
+				searchResult.totalHits, len(searchResult.entries)))
+		})
+	}()
 }

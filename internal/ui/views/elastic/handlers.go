@@ -37,19 +37,33 @@ func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 }
 
 func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		filter := v.components.filterInput.GetText()
-		if filter == "" {
-			return nil
-		}
-		v.addFilter(filter)
-		v.components.filterInput.SetText("")
-		v.doRefreshWithCurrentTimeframe()
+	if event.Key() != tcell.KeyEnter {
+		return event
+	}
+
+	text := v.components.filterInput.GetText()
+	if text == "" {
 		return nil
 	}
-	return event
+
+	v.state.mu.Lock()
+	if _, err := ParseFilter(text); err != nil {
+		v.state.mu.Unlock()
+		v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
+		return nil
+	}
+
+	v.components.filterInput.SetText("")
+	v.addFilter(text)
+	v.state.mu.Unlock()
+
+	// Only refresh if the function is set
+	if v.refreshWithCurrentTimeframe != nil {
+		v.refreshWithCurrentTimeframe()
+	}
+	return nil
 }
+
 func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEsc:

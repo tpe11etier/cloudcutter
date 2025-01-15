@@ -57,6 +57,7 @@ func createTestView(t *testing.T) *View {
 				spinner:           nil,
 			},
 		},
+		refreshWithCurrentTimeframe: func() {}, // No-op for testing
 	}
 
 	cfg := types.LayoutConfig{
@@ -131,21 +132,17 @@ func createTestView(t *testing.T) *View {
 	view.components.timeframeInput = view.manager.GetPrimitiveByID("timeframeInput").(*tview.InputField)
 	view.components.resultsTable = view.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 
-	view.initTimeframeState()
+	view.refreshWithCurrentTimeframe = nil
+
+	// Don't set timeframe since we're not refreshing
+	view.state.search.timeframe = "12h"
+	view.components.timeframeInput.SetText("12h")
 
 	return view
 }
 
 func TestHandleFilterInput(t *testing.T) {
 	view := createTestView(t)
-
-	originalRefresh := view.doRefreshWithCurrentTimeframe
-	view.refreshWithCurrentTimeframe = func() {
-		// do nothing in tests
-	}
-	defer func() {
-		view.refreshWithCurrentTimeframe = originalRefresh
-	}()
 
 	tests := []struct {
 		name            string
@@ -175,8 +172,9 @@ func TestHandleFilterInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset state for each test
+			view.state.mu.Lock()
 			view.state.data.filters = []string{}
+			view.state.mu.Unlock()
 
 			view.components.filterInput.SetText(tt.inputText)
 
@@ -184,19 +182,23 @@ func TestHandleFilterInput(t *testing.T) {
 			event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 			view.handleFilterInput(event)
 
-			// Check if input was cleared when expected
+			// Get results under lock
+			view.state.mu.RLock()
+			numFilters := len(view.state.data.filters)
+			filters := append([]string{}, view.state.data.filters...) // Make a copy
+			view.state.mu.RUnlock()
+
 			if tt.expectClearText && view.components.filterInput.GetText() != "" {
-				t.Errorf("Expected input field to be cleared, but got %s", view.components.filterInput.GetText())
+				t.Errorf("Expected input field to be cleared, but got %s",
+					view.components.filterInput.GetText())
 			}
 
-			// Check if filter was added when expected
-			if tt.expectAddFilter && len(view.state.data.filters) == 0 {
+			if tt.expectAddFilter && numFilters == 0 {
 				t.Errorf("Expected filter to be added, but none was added")
 			}
 
-			// Check if filter was not added when not expected
-			if !tt.expectAddFilter && len(view.state.data.filters) > 0 {
-				t.Errorf("Expected no filter to be added, but got filters: %v", view.state.data.filters)
+			if !tt.expectAddFilter && numFilters > 0 {
+				t.Errorf("Expected no filter to be added, but got filters: %v", filters)
 			}
 		})
 	}
