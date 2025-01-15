@@ -7,6 +7,7 @@ import (
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"os"
@@ -15,10 +16,49 @@ import (
 
 func createTestView(t *testing.T) *View {
 	log := createTestLogger(t)
-
 	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log)
 
-	// Define layout configuration
+	view := &View{
+		manager: manager,
+		components: viewComponents{
+			filterPrompt: components.NewPrompt(),
+		},
+		state: State{
+			pagination: PaginationState{
+				currentPage: 1,
+				pageSize:    50,
+				totalPages:  1,
+			},
+			ui: UIState{
+				showRowNumbers:  true,
+				isLoading:       false,
+				fieldListFilter: "",
+			},
+			data: DataState{
+				activeFields:     make(map[string]bool),
+				filters:          []string{},
+				currentResults:   []*DocEntry{},
+				fieldOrder:       []string{},
+				originalFields:   []string{},
+				fieldMatches:     []string{},
+				filteredResults:  []*DocEntry{},
+				displayedResults: []*DocEntry{},
+				columnCache:      make(map[string][]string),
+			},
+			search: SearchState{
+				currentIndex:    "test-index",
+				matchingIndices: []string{},
+				numResults:      1000,
+				timeframe:       "12h",
+			},
+			misc: MiscState{
+				visibleRows:       0,
+				lastDisplayHeight: 0,
+				spinner:           nil,
+			},
+		},
+	}
+
 	cfg := types.LayoutConfig{
 		Direction: tview.FlexRow,
 		Components: []types.Component{
@@ -41,16 +81,6 @@ func createTestView(t *testing.T) *View {
 							FieldBackgroundColor: tcell.ColorBlack,
 							FieldTextColor:       tcell.ColorBeige,
 						},
-						Properties: types.InputFieldProperties{
-							Label:      " ES Filter >_ ",
-							FieldWidth: 0,
-							OnFocus: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorMediumTurquoise)
-							},
-							OnBlur: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorBeige)
-							},
-						},
 					},
 					{
 						ID:        "activeFilters",
@@ -60,18 +90,17 @@ func createTestView(t *testing.T) *View {
 							BaseStyle: types.BaseStyle{
 								Border:      true,
 								BorderColor: tcell.ColorBeige,
-								Title:       " Active Filters ",
-								TitleColor:  tcell.ColorYellow,
 							},
 						},
-						Properties: types.TextViewProperties{
-							Text:          "No active filters",
-							DynamicColors: true,
-							OnFocus: func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorMediumTurquoise)
-							},
-							OnBlur: func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorBeige)
+					},
+					{
+						ID:        "timeframeInput",
+						Type:      types.ComponentInputField,
+						FixedSize: 3,
+						Style: types.InputFieldStyle{
+							BaseStyle: types.BaseStyle{
+								Border:      true,
+								BorderColor: tcell.ColorBeige,
 							},
 						},
 					},
@@ -83,8 +112,6 @@ func createTestView(t *testing.T) *View {
 							BaseStyle: types.BaseStyle{
 								Border:      true,
 								BorderColor: tcell.ColorBeige,
-								Title:       " Results ",
-								TitleColor:  tcell.ColorYellow,
 							},
 						},
 					},
@@ -93,30 +120,32 @@ func createTestView(t *testing.T) *View {
 		},
 	}
 
-	// Create the view
-	view := &View{
-		manager: manager,
-	}
-
 	// Set up the layout and components
 	view.components.content = view.manager.CreateLayout(cfg).(*tview.Flex)
 	pages := view.manager.Pages()
 	pages.AddPage("elastic", view.components.content, true, true)
 
+	// Initialize all required components
 	view.components.filterInput = view.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	view.components.activeFilters = view.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
+	view.components.timeframeInput = view.manager.GetPrimitiveByID("timeframeInput").(*tview.InputField)
 	view.components.resultsTable = view.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
+
+	view.initTimeframeState()
 
 	return view
 }
 
 func TestHandleFilterInput(t *testing.T) {
 	view := createTestView(t)
-	view.state = State{
-		data: DataState{
-			filters: []string{"filter1", "filter2"},
-		},
+
+	originalRefresh := view.doRefreshWithCurrentTimeframe
+	view.refreshWithCurrentTimeframe = func() {
+		// do nothing in tests
 	}
+	defer func() {
+		view.refreshWithCurrentTimeframe = originalRefresh
+	}()
 
 	tests := []struct {
 		name            string
@@ -126,7 +155,7 @@ func TestHandleFilterInput(t *testing.T) {
 	}{
 		{
 			name:            "Add valid filter",
-			inputText:       "filter1",
+			inputText:       "status=active",
 			expectClearText: true,
 			expectAddFilter: true,
 		},
@@ -136,18 +165,38 @@ func TestHandleFilterInput(t *testing.T) {
 			expectClearText: false,
 			expectAddFilter: false,
 		},
+		{
+			name:            "Invalid filter",
+			inputText:       "invalid_filter",
+			expectClearText: false,
+			expectAddFilter: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			view.components.filterInput.SetText(tt.inputText)
-			view.handleFilterInput(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+			// Reset state for each test
+			view.state.data.filters = []string{}
 
+			view.components.filterInput.SetText(tt.inputText)
+
+			// Simulate Enter key press
+			event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+			view.handleFilterInput(event)
+
+			// Check if input was cleared when expected
 			if tt.expectClearText && view.components.filterInput.GetText() != "" {
 				t.Errorf("Expected input field to be cleared, but got %s", view.components.filterInput.GetText())
 			}
+
+			// Check if filter was added when expected
 			if tt.expectAddFilter && len(view.state.data.filters) == 0 {
 				t.Errorf("Expected filter to be added, but none was added")
+			}
+
+			// Check if filter was not added when not expected
+			if !tt.expectAddFilter && len(view.state.data.filters) > 0 {
+				t.Errorf("Expected no filter to be added, but got filters: %v", view.state.data.filters)
 			}
 		})
 	}
@@ -160,7 +209,6 @@ func createTestLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	// Configure the logger
 	cfg := logger.Config{
 		LogDir: tempDir,
 		Prefix: "test",
@@ -181,151 +229,3 @@ func createTestLogger(t *testing.T) *logger.Logger {
 
 	return l
 }
-
-//func TestHandleFieldList(t *testing.T) {
-//	view := createTestView(t)
-//
-//	tests := []struct {
-//		name          string
-//		key           tcell.Key
-//		expectedFocus tview.Primitive
-//	}{
-//		{
-//			name:          "Focus remains after Enter",
-//			key:           tcell.KeyEnter,
-//			expectedFocus: view.components.fieldList,
-//		},
-//		{
-//			name:          "Reset filter on Backspace",
-//			key:           tcell.KeyBackspace,
-//			expectedFocus: view.components.fieldList,
-//		},
-//	}
-//
-//	for _, tt := range tests {
-//		t.Run(tt.name, func(t *testing.T) {
-//			event := tcell.NewEventKey(tt.key, 0, tcell.ModNone)
-//			view.handleFieldList(event)
-//
-//			if view.manager.App().GetFocus() != tt.expectedFocus {
-//				t.Errorf("Expected focus to remain on %v, got %v", tt.expectedFocus, view.manager.App().GetFocus())
-//			}
-//		})
-//	}
-//}
-//
-//func TestHandleResultsTable(t *testing.T) {
-//	view := createTestView(t)
-//	view.state = State{
-//		data: DataState{
-//			displayedResults: []*DocEntry{
-//				{Index: "index1", ID: "doc1"},
-//				{Index: "index2", ID: "doc2"},
-//			},
-//		},
-//	}
-//
-//	tests := []struct {
-//		name       string
-//		row        int
-//		expectCall bool
-//	}{
-//		{
-//			name:       "Valid row selected",
-//			row:        1,
-//			expectCall: true,
-//		},
-//		{
-//			name:       "Invalid row selected",
-//			row:        3,
-//			expectCall: false,
-//		},
-//	}
-//
-//	for _, tt := range tests {
-//		t.Run(tt.name, func(t *testing.T) {
-//			view.components.resultsTable.Select(tt.row, 0)
-//			event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-//			view.handleResultsTable(event)
-//
-//			// Add assertions for API call mocks or modal visibility
-//			// Example:
-//			// if tt.expectCall && !mockAPICallInvoked {
-//			//     t.Errorf("Expected API call to be invoked for row %d", tt.row)
-//			// }
-//		})
-//	}
-//}
-
-//func TestHandleActiveFilters(t *testing.T) {
-//	view := createTestView(t)
-//	view.state = State{
-//		data: DataState{
-//			filters: []string{"filter1", "filter2", "filter3"},
-//		},
-//	}
-//
-//	tests := []struct {
-//		name              string
-//		key               tcell.Key
-//		expectFilterCount int
-//	}{
-//		{
-//			name:              "Delete a selected filter",
-//			key:               tcell.KeyDelete,
-//			expectFilterCount: 2,
-//		},
-//		{
-//			name:              "Escape from activeFilters",
-//			key:               tcell.KeyEsc,
-//			expectFilterCount: 3, // No filters removed
-//		},
-//	}
-//
-//	for _, tt := range tests {
-//		t.Run(tt.name, func(t *testing.T) {
-//			event := tcell.NewEventKey(tt.key, 0, tcell.ModNone)
-//			view.handleActiveFilters(event)
-//
-//			if len(view.state.data.filters) != tt.expectFilterCount {
-//				t.Errorf("Expected %d filters, got %d", tt.expectFilterCount, len(view.state.data.filters))
-//			}
-//		})
-//	}
-//}
-
-//func TestHandleTabKey(t *testing.T) {
-//	view := createTestView(t)
-//
-//	tests := []struct {
-//		name         string
-//		currentFocus tview.Primitive
-//		nextFocus    tview.Primitive
-//	}{
-//		{
-//			name:         "Cycle from filterInput to activeFilters",
-//			currentFocus: view.components.filterInput,
-//			nextFocus:    view.components.activeFilters,
-//		},
-//		{
-//			name:         "Cycle from activeFilters to indexView",
-//			currentFocus: view.components.activeFilters,
-//			nextFocus:    view.components.resultsFlex,
-//		},
-//		{
-//			name:         "Cycle back to filterInput from resultsTable",
-//			currentFocus: view.components.resultsTable,
-//			nextFocus:    view.components.filterInput,
-//		},
-//	}
-//
-//	for _, tt := range tests {
-//		t.Run(tt.name, func(t *testing.T) {
-//			view.manager.App().SetFocus(tt.currentFocus)
-//			view.handleTabKey(tt.currentFocus)
-//			if view.manager.App().GetFocus() != tt.nextFocus {
-//				t.Errorf("Expected focus on %v, got %v", tt.nextFocus, view.manager.App().GetFocus())
-//			}
-//		})
-//	}
-//}

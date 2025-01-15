@@ -26,11 +26,12 @@ import (
 )
 
 type View struct {
-	manager    *manager.Manager
-	components viewComponents
-	service    *elastic.Service
-	state      State
-	layout     tview.Primitive
+	manager                     *manager.Manager
+	components                  viewComponents
+	service                     *elastic.Service
+	state                       State
+	layout                      tview.Primitive
+	refreshWithCurrentTimeframe func()
 }
 
 type viewComponents struct {
@@ -152,6 +153,7 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 		return v, err
 	}
 
+	v.refreshWithCurrentTimeframe = v.doRefreshWithCurrentTimeframe
 	manager.SetFocus(v.components.filterInput)
 	v.manager.Logger().Info("Elastic View successfully initialized")
 	return v, nil
@@ -247,6 +249,11 @@ func (v *View) setupLayout() {
 									Text:       v.state.search.currentIndex,
 									OnFocus: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+										// Update help commands with fresh indices
+										if helpCategory := v.manager.Help().GetContextHelp(); helpCategory != nil {
+											helpCategory.Commands = getIndices(v)
+											v.manager.Help().SetContextHelp(helpCategory)
+										}
 									},
 									OnBlur: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorBeige)
@@ -255,7 +262,7 @@ func (v *View) setupLayout() {
 										if s != "" {
 											v.state.search.currentIndex = s
 											v.resetFieldState()
-											v.refreshWithCurrentTimeframe()
+											v.doRefreshWithCurrentTimeframe()
 										}
 									},
 								},
@@ -296,7 +303,7 @@ func (v *View) setupLayout() {
 												return
 											}
 										}
-										v.refreshWithCurrentTimeframe()
+										v.doRefreshWithCurrentTimeframe()
 									},
 								},
 								Help: []help.Command{
@@ -629,6 +636,14 @@ func (v *View) addFilter(filter string) {
 		return
 	}
 
+	// Validate the filter using ParseFilter
+	_, err := ParseFilter(filter)
+	if err != nil {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
+		return
+	}
+
+	// Check for duplicates
 	for _, existing := range v.state.data.filters {
 		if existing == filter {
 			return
@@ -638,7 +653,6 @@ func (v *View) addFilter(filter string) {
 	v.state.data.filters = append(v.state.data.filters, filter)
 	v.updateFiltersDisplay()
 	v.refreshResults()
-
 	v.updateHeader()
 }
 
@@ -1830,10 +1844,10 @@ func (v *View) initTimeframeState() {
 
 	v.components.timeframeInput.SetText("12h")
 
-	v.refreshWithCurrentTimeframe()
+	v.doRefreshWithCurrentTimeframe()
 }
 
-func (v *View) refreshWithCurrentTimeframe() {
+func (v *View) doRefreshWithCurrentTimeframe() {
 	timeframe := strings.TrimSpace(v.components.timeframeInput.GetText())
 	// If timeframe is "12h" (the default) and hasn't been explicitly set, treat as empty
 	if timeframe == "12h" && v.state.search.timeframe == "" {

@@ -211,3 +211,7 @@ func (h *Help) SetSelectable(b bool) {
 	h.Selectable = b
 	h.setupLayout()
 }
+
+func (h *Help) GetContextHelp() *HelpCategory {
+	return h.contextCategory
+}

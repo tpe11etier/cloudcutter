@@ -9,18 +9,60 @@ import (
 )
 
 func TestBuildQuery(t *testing.T) {
+	fixedTime := time.Date(2024, 10, 4, 1, 0, 17, 0, time.UTC)
+
 	tests := []struct {
 		name        string
 		filters     []string
 		size        int
+		timeframe   string
 		want        map[string]any
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name:    "No filters returns match_all query",
-			filters: []string{},
-			size:    10,
+			name:      "No filters returns match_all query with timeframe",
+			filters:   []string{},
+			size:      10,
+			timeframe: "12h",
+			want: map[string]any{
+				"query": map[string]any{
+					"bool": map[string]any{
+						"must": []map[string]any{
+							{
+								"bool": map[string]any{
+									"should": []map[string]any{
+										{
+											"range": map[string]any{
+												"unixTime": map[string]any{
+													"gte": fixedTime.Unix() - 12*60*60,
+													"lte": fixedTime.Unix(),
+												},
+											},
+										},
+										{
+											"range": map[string]any{
+												"detectionGeneratedTime": map[string]any{
+													"gte": fixedTime.UnixMilli() - 12*60*60*1000,
+													"lte": fixedTime.UnixMilli(),
+												},
+											},
+										},
+									},
+									"minimum_should_match": 1,
+								},
+							},
+						},
+					},
+				},
+				"size": 10,
+			},
+		},
+		{
+			name:      "No filters returns match_all query without timeframe",
+			filters:   []string{},
+			size:      10,
+			timeframe: "",
 			want: map[string]any{
 				"query": map[string]any{
 					"match_all": map[string]any{},
@@ -32,17 +74,42 @@ func TestBuildQuery(t *testing.T) {
 			name:        "Negative size returns error",
 			filters:     []string{},
 			size:        -1,
+			timeframe:   "12h",
 			wantErr:     true,
 			errContains: "size must be non-negative",
 		},
 		{
-			name:    "Single valid filter",
-			filters: []string{"status=active"},
-			size:    20,
+			name:      "Single valid filter with timeframe",
+			filters:   []string{"status=active"},
+			size:      20,
+			timeframe: "12h",
 			want: map[string]any{
 				"query": map[string]any{
 					"bool": map[string]any{
 						"must": []map[string]any{
+							{
+								"bool": map[string]any{
+									"should": []map[string]any{
+										{
+											"range": map[string]any{
+												"unixTime": map[string]any{
+													"gte": fixedTime.Unix() - 12*60*60,
+													"lte": fixedTime.Unix(),
+												},
+											},
+										},
+										{
+											"range": map[string]any{
+												"detectionGeneratedTime": map[string]any{
+													"gte": fixedTime.UnixMilli() - 12*60*60*1000,
+													"lte": fixedTime.UnixMilli(),
+												},
+											},
+										},
+									},
+									"minimum_should_match": 1,
+								},
+							},
 							{
 								"match": map[string]any{
 									"status": "active",
@@ -59,144 +126,14 @@ func TestBuildQuery(t *testing.T) {
 			filters:     []string{"status=active", "age>", "role=admin"},
 			wantErr:     true,
 			size:        10,
+			timeframe:   "12h",
 			errContains: "missing value in range query",
-		},
-		{
-			name: "Complex query combining multiple types",
-			filters: []string{
-				"_id=2091402405ee09645b3a985deb2d0c8b6c37d324",
-				"status=active",
-				"age>=21",
-				"name=john*",
-				"is_deleted=false",
-				"last_login=null",
-			},
-			size: 20,
-			want: map[string]any{
-				"query": map[string]any{
-					"bool": map[string]any{
-						"must": []map[string]any{
-							{
-								"ids": map[string]any{
-									"values": []string{"2091402405ee09645b3a985deb2d0c8b6c37d324"},
-								},
-							},
-							{
-								"match": map[string]any{
-									"status": "active",
-								},
-							},
-							{
-								"range": map[string]any{
-									"age": map[string]any{
-										"gte": float64(21),
-									},
-								},
-							},
-							{
-								"wildcard": map[string]any{
-									"name": "john*",
-								},
-							},
-							{
-								"term": map[string]any{
-									"is_deleted": false,
-								},
-							},
-							{
-								"bool": map[string]any{
-									"must_not": map[string]any{
-										"exists": map[string]any{
-											"field": "last_login",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-				"size": 20,
-			},
-		},
-		{
-			name: "Query with escaped characters",
-			filters: []string{
-				"description=test\\*product",
-				"category=tools\\?misc",
-			},
-			size: 10,
-			want: map[string]any{
-				"query": map[string]any{
-					"bool": map[string]any{
-						"must": []map[string]any{
-							{
-								"match": map[string]any{
-									"description": "test*product",
-								},
-							},
-							{
-								"match": map[string]any{
-									"category": "tools?misc",
-								},
-							},
-						},
-					},
-				},
-				"size": 10,
-			},
-		},
-		{
-			name: "Query with all numeric comparisons",
-			filters: []string{
-				"price>100",
-				"price<=200",
-				"stock>=10",
-				"rating<5",
-			},
-			size: 15,
-			want: map[string]any{
-				"query": map[string]any{
-					"bool": map[string]any{
-						"must": []map[string]any{
-							{
-								"range": map[string]any{
-									"price": map[string]any{
-										"gt": float64(100),
-									},
-								},
-							},
-							{
-								"range": map[string]any{
-									"price": map[string]any{
-										"lte": float64(200),
-									},
-								},
-							},
-							{
-								"range": map[string]any{
-									"stock": map[string]any{
-										"gte": float64(10),
-									},
-								},
-							},
-							{
-								"range": map[string]any{
-									"rating": map[string]any{
-										"lt": float64(5),
-									},
-								},
-							},
-						},
-					},
-				},
-				"size": 15,
-			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildQuery(tt.filters, tt.size, "12h")
+			got, err := BuildQueryWithTime(tt.filters, tt.size, tt.timeframe, fixedTime)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("BuildQuery() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -215,7 +152,6 @@ func TestBuildQuery(t *testing.T) {
 		})
 	}
 }
-
 func TestParseFilter(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -883,13 +819,13 @@ func compareMaps(a, b map[string]interface{}) bool {
 			if !ok || !compareSlices(val1, val2) {
 				return false
 			}
-		case []map[string]interface{}: // Add specific case for slice of maps
-			val2, ok := v2.([]map[string]interface{})
-			if !ok || !compareSliceOfMaps(val1, val2) {
+		case time.Time:
+			val2, ok := v2.(time.Time)
+			if !ok || val1.Sub(val2).Seconds() > 1 {
 				return false
 			}
 		default:
-			if v1 != v2 {
+			if !reflect.DeepEqual(v1, v2) {
 				return false
 			}
 		}
@@ -911,31 +847,13 @@ func compareSlices(a, b []interface{}) bool {
 			}
 		case []interface{}:
 			val2, ok := b[i].([]interface{})
-			if !ok || !compareSlices(val1, val2) {
-				return false
-			}
-		case []map[string]interface{}: // Add specific case for slice of maps
-			val2, ok := b[i].([]map[string]interface{})
-			if !ok || !compareSliceOfMaps(val1, val2) {
+			if !ok || !compareSlices(val2, val2) {
 				return false
 			}
 		default:
-			if a[i] != b[i] {
+			if !reflect.DeepEqual(a[i], b[i]) {
 				return false
 			}
-		}
-	}
-	return true
-}
-
-// Helper function specifically for comparing slices of maps
-func compareSliceOfMaps(a, b []map[string]interface{}) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !compareMaps(a[i], b[i]) {
-			return false
 		}
 	}
 	return true

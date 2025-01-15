@@ -26,7 +26,13 @@ func (e *ParseError) Error() string {
 }
 
 // BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
+// BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
 func BuildQuery(filters []string, size int, timeframe string) (map[string]any, error) {
+	return BuildQueryWithTime(filters, size, timeframe, time.Now())
+}
+
+// BuildQueryWithTime is like BuildQuery but accepts a specific time for testing
+func BuildQueryWithTime(filters []string, size int, timeframe string, now time.Time) (map[string]any, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("size must be non-negative, got %d", size)
 	}
@@ -36,7 +42,7 @@ func BuildQuery(filters []string, size int, timeframe string) (map[string]any, e
 
 	// If timeframe is set, build a timeframe clause
 	if timeframe != "" {
-		timeQuery, err := BuildTimeQuery(timeframe, time.Now())
+		timeQuery, err := BuildTimeQuery(timeframe, now)
 		if err != nil {
 			return nil, fmt.Errorf("error building time query: %v", err)
 		}

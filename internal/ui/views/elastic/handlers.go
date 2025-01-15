@@ -45,7 +45,7 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 		}
 		v.addFilter(filter)
 		v.components.filterInput.SetText("")
-		v.refreshWithCurrentTimeframe()
+		v.doRefreshWithCurrentTimeframe()
 		return nil
 	}
 	return event
@@ -97,7 +97,7 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 			v.manager.App().QueueUpdateDraw(func() {
 				v.state.search.indexStats = stats
 				v.hideLoading()
-				v.refreshWithCurrentTimeframe()
+				v.doRefreshWithCurrentTimeframe()
 			})
 		}()
 
