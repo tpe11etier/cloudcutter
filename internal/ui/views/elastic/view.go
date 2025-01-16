@@ -251,7 +251,6 @@ func (v *View) setupLayout() {
 									Text:       v.state.search.currentIndex,
 									OnFocus: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
-										// Update help commands with fresh indices
 										if helpCategory := v.manager.Help().GetContextHelp(); helpCategory != nil {
 											helpCategory.Commands = getIndices(v)
 											v.manager.Help().SetContextHelp(helpCategory)
@@ -1317,7 +1316,10 @@ func (v *View) Show() {
 }
 
 func getIndices(v *View) []help.Command {
-	indices, _ := v.service.ListIndices(context.Background(), "*")
+	v.state.mu.RLock()
+	indices := v.state.search.matchingIndices
+	v.state.mu.RUnlock()
+
 	indexCommands := make([]help.Command, 0, len(indices))
 	for _, idx := range indices {
 		indexCommands = append(indexCommands, help.Command{
@@ -1665,6 +1667,12 @@ func (v *View) buildQuery() map[string]any {
 func (v *View) initFieldsSync() error {
 	// List available indices first
 	indices, err := v.service.ListIndices(context.Background(), "*")
+	if err != nil {
+		v.manager.Logger().Error("Failed to list indices", "error", err)
+	} else {
+		v.state.search.matchingIndices = indices
+	}
+
 	if err != nil {
 		v.manager.Logger().Debug(fmt.Sprintf("[ERROR] Failed to list indices: %v", err))
 	} else {

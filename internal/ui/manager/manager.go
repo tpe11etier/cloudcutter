@@ -87,8 +87,12 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		logger:         log,
 	}
 
-	vm.profileHandler = profile.NewProfileHandler(vm.StatusChan)
-
+	vm.profileHandler = profile.NewProfileHandler(
+		vm.StatusChan,
+		func(message string) { vm.showLoading(message) },
+		func() { vm.hideLoading() },
+	)
+	
 	vm.initialize()
 	return vm
 }
