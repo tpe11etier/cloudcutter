@@ -40,22 +40,28 @@ func (ph *Handler) sendStatus(status string) {
 
 func (ph *Handler) SwitchProfile(ctx context.Context, profile string, callback func(aws.Config, error)) {
 	if ph.onLoadStart != nil {
+		// Show loading first, then start authentication
 		ph.onLoadStart(fmt.Sprintf("Authenticating profile: %s", profile))
 	}
+
+	// Start async profile switch after loading is shown
 	go func() {
 		defer func() {
 			if ph.onLoadEnd != nil {
 				ph.onLoadEnd()
 			}
 		}()
+
 		session, err := ph.auth.SwitchProfile(ctx, profile, ph.region)
 		if err != nil {
+			ph.sendStatus(fmt.Sprintf("Authentication failed: %v", err))
 			callback(aws.Config{}, err)
 			return
 		}
+
+		ph.sendStatus(fmt.Sprintf("Successfully authenticated with profile: %s", profile))
 		callback(session.Config, nil)
 	}()
-
 }
 
 func (ph *Handler) GetCurrentProfile() string {

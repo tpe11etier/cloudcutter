@@ -16,6 +16,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+
 	"sync"
 
 	"io"
@@ -25,6 +26,18 @@ import (
 	"strings"
 	"time"
 )
+
+type FieldMetadata struct {
+	Type         string
+	Searchable   bool
+	Aggregatable bool
+	Active       bool
+}
+
+type searchResult struct {
+	entries   []*DocEntry
+	totalHits int
+}
 
 type View struct {
 	manager                     *manager.Manager
@@ -84,6 +97,7 @@ type DataState struct {
 	displayedResults []*DocEntry
 	columnCache      map[string][]string
 	currentFilter    string
+	fieldCache       *FieldCache
 }
 
 type SearchState struct {
@@ -99,6 +113,7 @@ type MiscState struct {
 	visibleRows       int
 	lastDisplayHeight int
 	spinner           *spinner.Spinner
+	rateLimit         *RateLimiter
 }
 
 func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex string) (*View, error) {
@@ -129,17 +144,19 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 				filteredResults:  []*DocEntry{},
 				displayedResults: []*DocEntry{},
 				columnCache:      make(map[string][]string),
+				fieldCache:       NewFieldCache(),
 			},
 			search: SearchState{
 				currentIndex:    defaultIndex,
 				matchingIndices: []string{},
 				numResults:      1000,
-				timeframe:       "12h",
+				timeframe:       "today",
 			},
 			misc: MiscState{
 				visibleRows:       0,
 				lastDisplayHeight: 0,
 				spinner:           nil,
+				rateLimit:         NewRateLimiter(),
 			},
 		},
 	}
@@ -289,7 +306,7 @@ func (v *View) setupLayout() {
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
-									Text:       "12h",
+									Text:       "today",
 									OnFocus: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
 									},
@@ -779,6 +796,7 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 			filteredResults:  []*DocEntry{},
 			displayedResults: []*DocEntry{},
 			columnCache:      make(map[string][]string),
+			fieldCache:       NewFieldCache(),
 		},
 		search: SearchState{
 			currentIndex:    v.state.search.currentIndex,
@@ -790,6 +808,7 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 			visibleRows:       0,
 			lastDisplayHeight: 0,
 			spinner:           nil,
+			rateLimit:         NewRateLimiter(),
 		},
 	}
 
@@ -826,8 +845,9 @@ func (v *View) filterFieldList(filter string) {
 	filter = strings.ToLower(filter)
 	var matches []string
 
+	// Only show fields that match the filter AND are not currently active
 	for _, field := range v.state.data.originalFields {
-		if strings.Contains(strings.ToLower(field), filter) {
+		if strings.Contains(strings.ToLower(field), filter) && !v.state.data.activeFields[field] {
 			matches = append(matches, field)
 		}
 	}
@@ -842,7 +862,7 @@ func (v *View) filterFieldList(filter string) {
 		})
 	}
 
-	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing fields matching '%s' (%d matches)", filter, len(matches)))
+	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)", filter, len(matches)))
 }
 
 func (v *View) setupResultsTableHeaders(headers []string) {
@@ -939,97 +959,6 @@ func (v *View) showJSONModal(entry *DocEntry) {
 	v.manager.App().SetFocus(textView)
 }
 
-func (v *View) updateAvailableFields(results []*DocEntry) {
-	// Create a map to track available fields
-	fieldSet := make(map[string]bool)
-
-	// Process all results to collect fields
-	for _, entry := range results {
-		fields := entry.GetAvailableFields()
-		for _, field := range fields {
-			fieldSet[field] = true
-		}
-	}
-
-	var newFields []string
-	for field := range fieldSet {
-		newFields = append(newFields, field)
-	}
-	sort.Strings(newFields)
-
-	var addedFields []string
-	for _, field := range newFields {
-		if !contains(v.state.data.originalFields, field) {
-			addedFields = append(addedFields, field)
-		}
-	}
-
-	// Only update if we found new fields
-	if len(addedFields) > 0 {
-		// Update original fields
-		v.state.data.originalFields = newFields
-
-		// Update field order while preserving existing order
-		newFieldOrder := make([]string, 0, len(newFields))
-
-		// First add existing ordered fields
-		for _, field := range v.state.data.fieldOrder {
-			if fieldSet[field] {
-				newFieldOrder = append(newFieldOrder, field)
-			}
-		}
-
-		// Then add any new fields
-		for _, field := range newFields {
-			if !contains(newFieldOrder, field) {
-				newFieldOrder = append(newFieldOrder, field)
-			}
-		}
-
-		v.state.data.fieldOrder = newFieldOrder
-
-		// Update the UI
-		v.rebuildFieldList()
-
-		// Notify user
-		v.manager.UpdateStatusBar(fmt.Sprintf("Found %d new fields: %s",
-			len(addedFields), strings.Join(addedFields, ", ")))
-	}
-}
-
-func (v *View) updateHeader() {
-	var indexInfo string
-	if v.state.search.indexStats != nil {
-		stats := v.state.search.indexStats
-		var healthColor = style.GruvboxMaterial.Red
-		switch stats.Health {
-		case "green":
-			healthColor = style.GruvboxMaterial.Green
-		case "yellow":
-			healthColor = style.GruvboxMaterial.Yellow
-		}
-
-		indexInfo = fmt.Sprintf("%s ([%s]%s[-]) | %s docs | %s",
-			v.state.search.currentIndex,
-			healthColor,
-			stats.Health,
-			stats.DocsCount,
-			stats.StoreSize,
-		)
-	} else {
-		indexInfo = v.state.search.currentIndex
-	}
-
-	summary := []types.SummaryItem{
-		{Key: "Index", Value: indexInfo},
-		{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
-		{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
-		{Key: "Page", Value: fmt.Sprintf("[%s::b]%d/%d[-]", style.GruvboxMaterial.Yellow, v.state.pagination.currentPage, v.state.pagination.totalPages)},
-		{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
-	}
-	v.manager.UpdateHeader(summary)
-}
-
 func (v *View) displayFilteredResults(filterText string) {
 	v.state.mu.Lock()
 	if v.state.data.currentFilter == filterText {
@@ -1075,71 +1004,6 @@ func (v *View) entryMatchesFilter(entry *DocEntry, filterText string) bool {
 		}
 	}
 	return false
-}
-
-func (v *View) displayCurrentPage() {
-
-	oldRowOffset, oldColOffset := v.components.resultsTable.GetOffset()
-
-	v.components.resultsTable.Clear()
-
-	headers := v.getActiveHeaders()
-	if len(headers) == 0 {
-		v.manager.UpdateStatusBar("No fields selected. Select a field to see data.")
-		return
-	}
-
-	v.calculateVisibleRows()
-
-	displayHeaders := headers
-	if v.state.ui.showRowNumbers {
-		displayHeaders = append([]string{"#"}, headers...)
-	}
-
-	v.setupResultsTableHeaders(displayHeaders)
-
-	totalResults := len(v.state.data.displayedResults)
-	if totalResults == 0 {
-		v.manager.UpdateStatusBar("No results to display.")
-		return
-	}
-
-	start := (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
-	if start >= totalResults {
-		// If start is beyond total results, adjust to last page
-		v.state.pagination.currentPage = (totalResults + v.state.pagination.pageSize - 1) / v.state.pagination.pageSize
-		start = (v.state.pagination.currentPage - 1) * v.state.pagination.pageSize
-	}
-	end := start + v.state.pagination.pageSize
-	if end > totalResults {
-		end = totalResults
-	}
-
-	pageResults := v.state.data.displayedResults[start:end]
-
-	for rowIdx, entry := range pageResults {
-		currentRow := rowIdx + 1
-		currentCol := 0
-
-		if v.state.ui.showRowNumbers {
-			v.components.resultsTable.SetCell(currentRow, currentCol,
-				tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
-					SetTextColor(tcell.ColorGray).
-					SetAlign(tview.AlignRight))
-			currentCol++
-		}
-
-		for _, header := range headers {
-			value := entry.GetFormattedValue(header)
-			v.components.resultsTable.SetCell(currentRow, currentCol,
-				tview.NewTableCell(value).
-					SetTextColor(tcell.ColorBeige).
-					SetAlign(tview.AlignLeft))
-			currentCol++
-		}
-	}
-	v.components.resultsTable.SetOffset(oldRowOffset, oldColOffset)
-	v.updateStatusBar(len(pageResults))
 }
 
 func (v *View) updateStatusBar(currentPageSize int) {
@@ -1330,15 +1194,6 @@ func getIndices(v *View) []help.Command {
 	return indexCommands
 }
 
-func contains(slice []string, str string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
-}
-
 func (v *View) showFilterPrompt(source tview.Primitive) {
 	previousFocus := source
 
@@ -1432,104 +1287,6 @@ func (v *View) processSearchResults(hits []elastic.ESSearchHit) ([]*DocEntry, er
 	return results, nil
 }
 
-func (v *View) updateResultsState(results []*DocEntry) {
-	v.state.data.filteredResults = results
-	v.state.data.displayedResults = append([]*DocEntry(nil), results...)
-
-	totalResults := len(results)
-	v.state.pagination.totalPages = int(math.Ceil(float64(totalResults) / float64(v.state.pagination.pageSize)))
-	if v.state.pagination.totalPages < 1 {
-		v.state.pagination.totalPages = 1
-	}
-}
-
-func (v *View) getEntryFields(entries []*DocEntry) []string {
-	fieldSet := make(map[string]bool)
-
-	for _, entry := range entries {
-		fields := entry.GetAvailableFields()
-		for _, field := range fields {
-			fieldSet[field] = true
-		}
-	}
-
-	fields := make([]string, 0, len(fieldSet))
-	for field := range fieldSet {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-
-	return fields
-}
-
-func (v *View) updateFieldList(fields []string) {
-	v.components.fieldList.Clear()
-	for _, field := range fields {
-		fieldName := field
-		v.components.fieldList.AddItem(fieldName, "", 0, func() {
-			v.toggleField(fieldName)
-		})
-	}
-}
-
-func (v *View) fetchLargeResultSet() ([]*DocEntry, error) {
-	var allResults []*DocEntry
-
-	// Initial search with scroll
-	query := v.buildQuery()
-	query["size"] = 1000
-
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return nil, fmt.Errorf("error creating query: %v", err)
-	}
-
-	// Initial scroll request
-	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
-		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-		v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("scroll search error: %v", err)
-	}
-
-	for {
-		var result elastic.ESSearchResult
-		if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-			res.Body.Close()
-			return nil, fmt.Errorf("error decoding response: %v", err)
-		}
-		res.Body.Close()
-
-		if len(result.Hits.Hits) == 0 {
-			_, err = v.service.Client.ClearScroll(
-				v.service.Client.ClearScroll.WithScrollID(result.ScrollID),
-			)
-			if err != nil {
-				v.manager.UpdateStatusBar(fmt.Sprintf("Warning: Failed to clear scroll: %v", err))
-			}
-			break
-		}
-
-		entries, err := v.processSearchResults(result.Hits.Hits)
-		if err != nil {
-			return nil, err
-		}
-		allResults = append(allResults, entries...)
-
-		res, err = v.service.Client.Scroll(
-			v.service.Client.Scroll.WithScrollID(result.ScrollID),
-			v.service.Client.Scroll.WithScroll(time.Duration(5)*time.Minute),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scroll error: %v", err)
-		}
-	}
-
-	return allResults, nil
-}
-
 func (v *View) toggleFieldList() {
 	v.state.ui.fieldListVisible = !v.state.ui.fieldListVisible
 	v.updateResultsLayout()
@@ -1605,46 +1362,71 @@ func (v *View) toggleField(field string) {
 	}
 
 	// Refresh results to show new column order
-	go func() {
-		v.refreshResults()
-	}()
+	v.refreshResults()
 }
 
 func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, error) {
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		v.manager.Logger().Error("Error marshaling query", "error", err)
-		return nil, fmt.Errorf("error creating query: %v", err)
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Wait according to rate limit
+		v.state.misc.rateLimit.Wait()
+
+		queryJSON, err := json.Marshal(query)
+		if err != nil {
+			v.manager.Logger().Error("Error marshaling query", "error", err)
+			return nil, fmt.Errorf("error creating query: %v", err)
+		}
+
+		v.manager.Logger().Debug("Executing search query", "index", v.state.search.currentIndex, "query", string(queryJSON))
+
+		res, err := v.service.Client.Search(
+			v.service.Client.Search.WithIndex(v.state.search.currentIndex),
+			v.service.Client.Search.WithBody(bytes.NewReader(queryJSON)),
+		)
+		if err != nil {
+			lastErr = err
+			// Check if it's a rate limit error
+			if strings.Contains(err.Error(), "429") {
+				v.state.misc.rateLimit.HandleTooManyRequests()
+				v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited, retrying in %v...", v.state.misc.rateLimit.GetRetryAfter()))
+				continue
+			}
+			v.manager.Logger().Error("Search query failed", "error", err, "index", v.state.search.currentIndex)
+			return nil, fmt.Errorf("search error: %v", err)
+		}
+		defer res.Body.Close()
+
+		bodyBytes, err := io.ReadAll(res.Body)
+		if err != nil {
+			v.manager.Logger().Error("Failed to read search response", "error", err)
+			return nil, fmt.Errorf("error reading response body: %v", err)
+		}
+
+		// Check if response indicates rate limiting
+		if res.StatusCode == 429 {
+			v.state.misc.rateLimit.HandleTooManyRequests()
+			v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited, retrying in %v...", v.state.misc.rateLimit.GetRetryAfter()))
+			continue
+		}
+
+		// Reset rate limit backoff on successful request
+		v.state.misc.rateLimit.Reset()
+
+		v.manager.Logger().Debug("Raw search response", "response", string(bodyBytes))
+
+		var result elastic.ESSearchResult
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			v.manager.Logger().Error("Failed to unmarshal search response", "error", err, "response", string(bodyBytes))
+			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+
+		v.manager.Logger().Info("Search executed successfully", "hits", result.Hits.Total.Value, "took", result.Took)
+		return &result, nil
 	}
 
-	v.manager.Logger().Debug("Executing search query", "index", v.state.search.currentIndex, "query", string(queryJSON))
-
-	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(v.state.search.currentIndex),
-		v.service.Client.Search.WithBody(bytes.NewReader(queryJSON)),
-	)
-	if err != nil {
-		v.manager.Logger().Error("Search query failed", "error", err, "index", v.state.search.currentIndex)
-		return nil, fmt.Errorf("search error: %v", err)
-	}
-	defer res.Body.Close()
-
-	bodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		v.manager.Logger().Error("Failed to read search response", "error", err)
-		return nil, fmt.Errorf("error reading response body: %v", err)
-	}
-
-	v.manager.Logger().Debug("Raw search response", "response", string(bodyBytes))
-
-	var result elastic.ESSearchResult
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		v.manager.Logger().Error("Failed to unmarshal search response", "error", err, "response", string(bodyBytes))
-		return nil, fmt.Errorf("error decoding response: %v", err)
-	}
-
-	v.manager.Logger().Info("Search executed successfully", "hits", result.Hits.Total.Value, "took", result.Took)
-	return &result, nil
+	return nil, fmt.Errorf("max retries exceeded: %v", lastErr)
 }
 
 func (v *View) buildQuery() map[string]any {
@@ -1665,51 +1447,51 @@ func (v *View) buildQuery() map[string]any {
 }
 
 func (v *View) initFieldsSync() error {
-	// List available indices first
-	indices, err := v.service.ListIndices(context.Background(), "*")
-	if err != nil {
-		v.manager.Logger().Error("Failed to list indices", "error", err)
-	} else {
+	var wg sync.WaitGroup
+	errChan := make(chan error, 2)
+
+	// Concurrent index listing
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		indices, err := v.service.ListIndices(context.Background(), "*")
+		if err != nil {
+			v.manager.Logger().Error("Failed to list indices", "error", err)
+			errChan <- err
+			return
+		}
+		v.state.mu.Lock()
 		v.state.search.matchingIndices = indices
+		v.state.mu.Unlock()
+	}()
+
+	// Load fields using field_caps API
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := v.loadFields(); err != nil {
+			errChan <- err
+			return
+		}
+
+		// Initialize UI components
+		v.manager.App().QueueUpdateDraw(func() {
+			v.rebuildFieldList()
+		})
+	}()
+
+	// Wait for all goroutines and check for errors
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	// Return first error if any occurred
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
 	}
-
-	if err != nil {
-		v.manager.Logger().Debug(fmt.Sprintf("[ERROR] Failed to list indices: %v", err))
-	} else {
-		v.manager.Logger().Debug(fmt.Sprintf("[DEBUG] Available indices: %v", indices))
-	}
-
-	// Simple query for initialization
-	query := map[string]any{
-		"query": map[string]any{
-			"match_all": map[string]any{},
-		},
-		"size": v.state.pagination.pageSize,
-	}
-
-	result, err := v.executeSearch(query)
-	if err != nil {
-		return err
-	}
-
-	entries, err := v.processSearchResults(result.Hits.Hits)
-	if err != nil {
-		return err
-	}
-
-	v.state.data.currentResults = entries
-	fields := v.getEntryFields(entries)
-
-	v.state.data.originalFields = fields
-	v.state.data.fieldOrder = make([]string, len(fields))
-	copy(v.state.data.fieldOrder, fields)
-
-	v.state.data.filteredResults = append([]*DocEntry(nil), entries...)
-	v.state.data.displayedResults = append([]*DocEntry(nil), v.state.data.filteredResults...)
-
-	v.updateFieldList(v.state.data.fieldOrder)
-	v.updateResultsState(entries)
-	v.displayCurrentPage()
 
 	return nil
 }
@@ -1779,15 +1561,15 @@ func colorizeJSON(jsonStr string) string {
 func (v *View) initTimeframeState() {
 	v.state.search.timeframe = ""
 
-	v.components.timeframeInput.SetText("12h")
+	v.components.timeframeInput.SetText("today")
 
 	v.doRefreshWithCurrentTimeframe()
 }
 
 func (v *View) doRefreshWithCurrentTimeframe() {
 	timeframe := strings.TrimSpace(v.components.timeframeInput.GetText())
-	// If timeframe is "12h" (the default) and hasn't been explicitly set, treat as empty
-	if timeframe == "12h" && v.state.search.timeframe == "" {
+	// If timeframe is "today" (the default) and hasn't been explicitly set, treat as empty
+	if timeframe == "today" && v.state.search.timeframe == "" {
 		v.state.search.timeframe = ""
 	} else {
 		v.state.search.timeframe = timeframe
@@ -1795,15 +1577,7 @@ func (v *View) doRefreshWithCurrentTimeframe() {
 	v.refreshResults()
 }
 
-// searchResult wraps our internal search results
-type searchResult struct {
-	entries   []*DocEntry
-	totalHits int
-}
-
-// fetchResults handles both regular and large result set fetching
 func (v *View) fetchResults() (*searchResult, error) {
-	// Build query with read lock since it accesses shared state
 	v.state.mu.RLock()
 	numResults := v.state.search.numResults
 	query := v.buildQuery()
@@ -1816,112 +1590,6 @@ func (v *View) fetchResults() (*searchResult, error) {
 	return v.fetchRegularResults(query, numResults, currentIndex)
 }
 
-// fetchRegularResults handles normal-sized result sets
-func (v *View) fetchRegularResults(query map[string]any, numResults int, index string) (*searchResult, error) {
-	query["size"] = numResults
-
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling query: %v", err)
-	}
-
-	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(index),
-		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("search error: %v", err)
-	}
-	defer res.Body.Close()
-
-	bodyBytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response: %v", err)
-	}
-
-	var result elastic.ESSearchResult
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("error decoding response: %v", err)
-	}
-
-	entries, err := v.processSearchResults(result.Hits.Hits)
-	if err != nil {
-		return nil, fmt.Errorf("error processing results: %v", err)
-	}
-
-	return &searchResult{
-		entries:   entries,
-		totalHits: result.Hits.GetTotalHits(),
-	}, nil
-}
-
-// fetchLargeResults handles result sets larger than 10k using scroll API
-func (v *View) fetchLargeResults(query map[string]any, index string) (*searchResult, error) {
-	query["size"] = 1000 // Standard batch size for scroll
-
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return nil, fmt.Errorf("error creating query: %v", err)
-	}
-
-	// Initial scroll request
-	res, err := v.service.Client.Search(
-		v.service.Client.Search.WithIndex(index),
-		v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-		v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("initial scroll error: %v", err)
-	}
-	defer res.Body.Close()
-
-	var allResults []*DocEntry
-
-	for {
-		bodyBytes, err := io.ReadAll(res.Body)
-		if err != nil {
-			return nil, fmt.Errorf("error reading response: %v", err)
-		}
-
-		var result elastic.ESSearchResult
-		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return nil, fmt.Errorf("error decoding response: %v", err)
-		}
-
-		if len(result.Hits.Hits) == 0 {
-			// Clean up scroll when done
-			_, err = v.service.Client.ClearScroll(
-				v.service.Client.ClearScroll.WithScrollID(result.ScrollID),
-			)
-			if err != nil {
-				v.manager.Logger().Error("Failed to clear scroll", "error", err)
-			}
-			break
-		}
-
-		entries, err := v.processSearchResults(result.Hits.Hits)
-		if err != nil {
-			return nil, fmt.Errorf("error processing batch: %v", err)
-		}
-		allResults = append(allResults, entries...)
-
-		// Get next batch
-		res, err = v.service.Client.Scroll(
-			v.service.Client.Scroll.WithScrollID(result.ScrollID),
-			v.service.Client.Scroll.WithScroll(time.Duration(5)*time.Minute),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scroll error: %v", err)
-		}
-	}
-
-	return &searchResult{
-		entries:   allResults,
-		totalHits: len(allResults),
-	}, nil
-}
-
-// refreshResults is now simplified to use fetchResults
 func (v *View) refreshResults() {
 	v.state.mu.Lock()
 	if v.state.ui.isLoading {
@@ -1957,9 +1625,11 @@ func (v *View) refreshResults() {
 		v.manager.Logger().Info("Results refreshed successfully",
 			"totalResults", len(searchResult.entries))
 
-		// Update all state under a single lock
+		// Update fields based on results
+		v.updateFieldsFromResults(searchResult.entries)
+
+		// Update results state
 		v.state.mu.Lock()
-		v.updateAvailableFields(searchResult.entries)
 		v.state.data.filteredResults = searchResult.entries
 		v.state.data.displayedResults = append([]*DocEntry(nil), searchResult.entries...)
 		v.state.pagination.totalPages = int(math.Ceil(float64(len(searchResult.entries)) /
@@ -1971,11 +1641,580 @@ func (v *View) refreshResults() {
 
 		// Queue UI updates
 		v.manager.App().QueueUpdateDraw(func() {
-			v.updateIndexStats()
+			//v.updateIndexStats()
 			v.displayCurrentPage()
 			v.updateHeader()
 			v.manager.UpdateStatusBar(fmt.Sprintf("Found %d results total (displaying %d)",
 				searchResult.totalHits, len(searchResult.entries)))
 		})
 	}()
+}
+
+func (v *View) resetFieldState() {
+	v.state.mu.Lock()
+	v.state.data.originalFields = nil
+	v.state.data.fieldOrder = nil
+	v.state.data.activeFields = make(map[string]bool)
+	v.state.data.columnCache = make(map[string][]string)
+	v.state.mu.Unlock()
+
+	v.components.fieldList.Clear()
+	v.components.selectedList.Clear()
+
+	go func() {
+		if err := v.loadFields(); err != nil {
+			v.manager.Logger().Error("Failed to load fields for new index", "error", err)
+			v.manager.App().QueueUpdateDraw(func() {
+				v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
+			})
+		}
+	}()
+}
+
+func (v *View) loadFields() error {
+	query := map[string]interface{}{
+		"size": 10,
+		"query": map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		},
+	}
+
+	result, err := v.executeSearch(query)
+	if err != nil {
+		return err
+	}
+
+	entries, err := v.processSearchResults(result.Hits.Hits)
+	if err != nil {
+		return err
+	}
+
+	activeFields := make(map[string]struct{})
+	for _, entry := range entries {
+		fields := entry.GetAvailableFields()
+		for _, field := range fields {
+			activeFields[field] = struct{}{}
+		}
+	}
+
+	// Only fetch field metadata if it isn't cached
+	needMetadata := false
+	for field := range activeFields {
+		if _, ok := v.state.data.fieldCache.Get(field); !ok {
+			needMetadata = true
+			break
+		}
+	}
+
+	if needMetadata {
+		// Fetch metadata for all fields
+		res, err := v.service.Client.FieldCaps(
+			v.service.Client.FieldCaps.WithIndex(v.state.search.currentIndex),
+			v.service.Client.FieldCaps.WithBody(strings.NewReader(`{"fields": "*"}`)),
+		)
+		if err != nil {
+			return fmt.Errorf("field caps error: %v", err)
+		}
+		defer res.Body.Close()
+
+		var fieldCaps struct {
+			Fields map[string]map[string]struct {
+				Type         string `json:"type"`
+				Searchable   bool   `json:"searchable"`
+				Aggregatable bool   `json:"aggregatable"`
+			} `json:"fields"`
+		}
+
+		if err := json.NewDecoder(res.Body).Decode(&fieldCaps); err != nil {
+			return fmt.Errorf("error decoding field caps: %v", err)
+		}
+
+		// Update cache with new metadata
+		for field, types := range fieldCaps.Fields {
+			for typeName, meta := range types {
+				v.state.data.fieldCache.Set(field, &FieldMetadata{
+					Type:         typeName,
+					Searchable:   meta.Searchable,
+					Aggregatable: meta.Aggregatable,
+					Active:       false,
+				})
+				break
+			}
+		}
+	}
+
+	// Process fields with locking
+	v.state.mu.Lock()
+	defer v.state.mu.Unlock()
+
+	// Create sorted list of active fields
+	fields := make([]string, 0, len(activeFields))
+	for field := range activeFields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	// Update state
+	v.state.data.originalFields = fields
+	v.state.data.fieldOrder = make([]string, len(fields))
+	copy(v.state.data.fieldOrder, fields)
+
+	// Update field metadata active status
+	for field := range activeFields {
+		if meta, ok := v.state.data.fieldCache.Get(field); ok {
+			meta.Active = true
+		}
+	}
+
+	// Preserve existing active field selections that are still valid
+	newActiveFields := make(map[string]bool)
+	for field := range v.state.data.activeFields {
+		if _, ok := activeFields[field]; ok {
+			newActiveFields[field] = true
+		}
+	}
+	v.state.data.activeFields = newActiveFields
+
+	return nil
+}
+
+func (v *View) updateFieldsFromResults(results []*DocEntry) {
+	if len(results) == 0 {
+		return
+	}
+
+	newFields := make(map[string]struct{})
+	for _, entry := range results {
+		fields := entry.GetAvailableFields()
+		for _, field := range fields {
+			newFields[field] = struct{}{}
+		}
+	}
+
+	v.state.mu.Lock()
+	defer v.state.mu.Unlock()
+
+	if len(newFields) == len(v.state.data.originalFields) {
+		allMatch := true
+		for _, field := range v.state.data.originalFields {
+			if _, ok := newFields[field]; !ok {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return // No changes needed
+		}
+	}
+
+	fields := make([]string, 0, len(newFields))
+	for field := range newFields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	// Update state atomically
+	v.state.data.originalFields = fields
+	v.state.data.fieldOrder = make([]string, len(fields))
+	copy(v.state.data.fieldOrder, fields)
+
+	// Update field metadata
+	for field := range newFields {
+		if meta, ok := v.state.data.fieldCache.Get(field); ok {
+			meta.Active = true
+		}
+	}
+
+	// Clean up field selections
+	newActiveFields := make(map[string]bool)
+	for field := range v.state.data.activeFields {
+		if _, ok := newFields[field]; ok {
+			newActiveFields[field] = true
+		}
+	}
+	v.state.data.activeFields = newActiveFields
+
+	// Queue UI update
+	v.manager.App().QueueUpdateDraw(func() {
+		v.rebuildFieldList()
+	})
+}
+
+func (v *View) fetchRegularResults(query map[string]any, numResults int, index string) (*searchResult, error) {
+	query["size"] = numResults
+
+	maxRetries := 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Wait according to rate limit
+		v.state.misc.rateLimit.Wait()
+
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(query); err != nil {
+			return nil, fmt.Errorf("error encoding query: %v", err)
+		}
+
+		res, err := v.service.Client.Search(
+			v.service.Client.Search.WithIndex(index),
+			v.service.Client.Search.WithBody(&buf),
+			v.service.Client.Search.WithScroll(5*time.Minute),
+		)
+
+		if err != nil {
+			lastErr = err
+			if strings.Contains(err.Error(), "429") {
+				v.state.misc.rateLimit.HandleTooManyRequests()
+				v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+					attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+				continue
+			}
+			return nil, fmt.Errorf("search error: %v", err)
+		}
+		defer res.Body.Close()
+
+		bodyBytes, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("error reading response: %v", err)
+		}
+
+		// Check if response indicates rate limiting
+		if res.StatusCode == 429 {
+			v.state.misc.rateLimit.HandleTooManyRequests()
+			v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+				attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+			continue
+		}
+
+		v.state.misc.rateLimit.Reset()
+
+		var result elastic.ESSearchResult
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+
+		entries, err := v.processSearchResults(result.Hits.Hits)
+		if err != nil {
+			return nil, fmt.Errorf("error processing results: %v", err)
+		}
+
+		return &searchResult{
+			entries:   entries,
+			totalHits: result.Hits.GetTotalHits(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("max retries exceeded: %v", lastErr)
+}
+
+func (v *View) fetchLargeResults(query map[string]any, index string) (*searchResult, error) {
+	query["size"] = 1000
+	maxRetries := 3
+	var lastErr error
+
+	// Initial scroll request with retries
+	var scrollID string
+	var allResults []*DocEntry
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		v.state.misc.rateLimit.Wait()
+
+		queryJSON, err := json.Marshal(query)
+		if err != nil {
+			return nil, fmt.Errorf("error creating query: %v", err)
+		}
+
+		res, err := v.service.Client.Search(
+			v.service.Client.Search.WithIndex(index),
+			v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
+			v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
+		)
+		if err != nil {
+			lastErr = err
+			if strings.Contains(err.Error(), "429") {
+				v.state.misc.rateLimit.HandleTooManyRequests()
+				v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+					attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+				continue
+			}
+			return nil, fmt.Errorf("initial scroll error: %v", err)
+		}
+
+		bodyBytes, err := io.ReadAll(res.Body)
+		res.Body.Close()
+
+		if err != nil {
+			return nil, fmt.Errorf("error reading response: %v", err)
+		}
+
+		if res.StatusCode == 429 {
+			v.state.misc.rateLimit.HandleTooManyRequests()
+			v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+				attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+			continue
+		}
+
+		var result elastic.ESSearchResult
+		if err := json.Unmarshal(bodyBytes, &result); err != nil {
+			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+
+		entries, err := v.processSearchResults(result.Hits.Hits)
+		if err != nil {
+			return nil, fmt.Errorf("error processing batch: %v", err)
+		}
+		allResults = append(allResults, entries...)
+		scrollID = result.ScrollID
+
+		// Successfully got first batch
+		v.state.misc.rateLimit.Reset()
+		break
+	}
+
+	if scrollID == "" {
+		return nil, fmt.Errorf("max retries exceeded: %v", lastErr)
+	}
+
+	// Continue scrolling with retries
+	for {
+		var scrollResult elastic.ESSearchResult
+
+		// Try to get next batch with retries
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			v.state.misc.rateLimit.Wait()
+
+			scrollRes, err := v.service.Client.Scroll(
+				v.service.Client.Scroll.WithScrollID(scrollID),
+				v.service.Client.Scroll.WithScroll(time.Duration(5)*time.Minute),
+			)
+			if err != nil {
+				if strings.Contains(err.Error(), "429") {
+					v.state.misc.rateLimit.HandleTooManyRequests()
+					v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+						attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+					continue
+				}
+				return nil, fmt.Errorf("scroll error: %v", err)
+			}
+
+			if scrollRes.StatusCode == 429 {
+				scrollRes.Body.Close()
+				v.state.misc.rateLimit.HandleTooManyRequests()
+				v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
+					attempt+1, maxRetries, v.state.misc.rateLimit.GetRetryAfter()))
+				continue
+			}
+
+			bodyBytes, err := io.ReadAll(scrollRes.Body)
+			scrollRes.Body.Close()
+
+			if err != nil {
+				return nil, fmt.Errorf("error reading scroll response: %v", err)
+			}
+
+			if err := json.Unmarshal(bodyBytes, &scrollResult); err != nil {
+				return nil, fmt.Errorf("error decoding scroll response: %v", err)
+			}
+
+			v.state.misc.rateLimit.Reset()
+			break
+		}
+
+		if len(scrollResult.Hits.Hits) == 0 {
+			// Clean up scroll
+			_, err := v.service.Client.ClearScroll(
+				v.service.Client.ClearScroll.WithScrollID(scrollID),
+			)
+			if err != nil {
+				v.manager.Logger().Error("Failed to clear scroll", "error", err)
+			}
+			break
+		}
+
+		entries, err := v.processSearchResults(scrollResult.Hits.Hits)
+		if err != nil {
+			return nil, fmt.Errorf("error processing batch: %v", err)
+		}
+		allResults = append(allResults, entries...)
+	}
+
+	return &searchResult{
+		entries:   allResults,
+		totalHits: len(allResults),
+	}, nil
+}
+
+func (v *View) updateHeader() {
+	summary := make([]types.SummaryItem, 0, 5)
+
+	var indexInfo string
+	if stats := v.state.search.indexStats; stats != nil {
+		var healthColor = style.GruvboxMaterial.Red
+		switch stats.Health {
+		case "green":
+			healthColor = style.GruvboxMaterial.Green
+		case "yellow":
+			healthColor = style.GruvboxMaterial.Yellow
+		}
+
+		indexInfo = fmt.Sprintf("%s ([%s]%s[-]) | %s docs | %s",
+			v.state.search.currentIndex,
+			healthColor,
+			stats.Health,
+			stats.DocsCount,
+			stats.StoreSize,
+		)
+	} else {
+		indexInfo = v.state.search.currentIndex
+	}
+
+	// Build summary items in a single pass
+	summary = append(summary,
+		types.SummaryItem{Key: "Index", Value: indexInfo},
+		types.SummaryItem{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
+		types.SummaryItem{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
+		types.SummaryItem{Key: "Page", Value: fmt.Sprintf("[%s::b]%d/%d[-]", style.GruvboxMaterial.Yellow, v.state.pagination.currentPage, v.state.pagination.totalPages)},
+		types.SummaryItem{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
+	)
+
+	v.manager.UpdateHeader(summary)
+}
+
+func (v *View) executeBatchSearch(query map[string]any, index string) (*searchResult, error) {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		v.state.misc.rateLimit.Wait()
+
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(query); err != nil {
+			return nil, fmt.Errorf("error encoding query: %v", err)
+		}
+
+		res, err := v.service.Client.Search(
+			v.service.Client.Search.WithIndex(index),
+			v.service.Client.Search.WithBody(&buf),
+		)
+
+		if err != nil {
+			lastErr = err
+			if strings.Contains(err.Error(), "429") {
+				v.state.misc.rateLimit.HandleTooManyRequests()
+				continue
+			}
+			return nil, fmt.Errorf("search error: %v", err)
+		}
+
+		bodyBytes, err := io.ReadAll(res.Body)
+		res.Body.Close()
+
+		if err != nil {
+			return nil, fmt.Errorf("error reading response: %v", err)
+		}
+
+		if res.StatusCode == 429 {
+			v.state.misc.rateLimit.HandleTooManyRequests()
+			continue
+		}
+
+		v.state.misc.rateLimit.Reset()
+
+		var result elastic.ESSearchResult
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&result); err != nil {
+			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+
+		entries, err := v.processSearchResults(result.Hits.Hits)
+		if err != nil {
+			return nil, fmt.Errorf("error processing results: %v", err)
+		}
+
+		return &searchResult{
+			entries:   entries,
+			totalHits: result.Hits.GetTotalHits(),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("max retries exceeded: %v", lastErr)
+}
+
+func (v *View) displayCurrentPage() {
+	table := v.components.resultsTable
+	oldRowOffset, oldColOffset := table.GetOffset()
+
+	table.Clear()
+
+	headers := v.getActiveHeaders()
+	if len(headers) == 0 {
+		v.manager.UpdateStatusBar("No fields selected. Select a field to see data.")
+		return
+	}
+
+	// Pre-calculate display headers with capacity hint
+	displayHeaders := make([]string, 0, len(headers)+1)
+	if v.state.ui.showRowNumbers {
+		displayHeaders = append(displayHeaders, "#")
+	}
+	displayHeaders = append(displayHeaders, headers...)
+
+	v.setupResultsTableHeaders(displayHeaders)
+
+	v.state.mu.RLock()
+	displayedResults := v.state.data.displayedResults
+	currentPage := v.state.pagination.currentPage
+	pageSize := v.state.pagination.pageSize
+	v.state.mu.RUnlock()
+
+	totalResults := len(displayedResults)
+	if totalResults == 0 {
+		v.manager.UpdateStatusBar("No results to display.")
+		return
+	}
+
+	// Calculate page bounds
+	start := (currentPage - 1) * pageSize
+	if start >= totalResults {
+		currentPage = (totalResults + pageSize - 1) / pageSize
+		start = (currentPage - 1) * pageSize
+	}
+	end := start + pageSize
+	if end > totalResults {
+		end = totalResults
+	}
+
+	pageResults := displayedResults[start:end]
+	numCols := len(displayHeaders)
+	cells := make([][]*tview.TableCell, len(pageResults))
+
+	for rowIdx := range pageResults {
+		cells[rowIdx] = make([]*tview.TableCell, numCols)
+		entry := pageResults[rowIdx]
+		currentCol := 0
+
+		if v.state.ui.showRowNumbers {
+			cells[rowIdx][currentCol] = tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
+				SetTextColor(tcell.ColorGray).
+				SetAlign(tview.AlignRight)
+			currentCol++
+		}
+
+		for _, header := range headers {
+			cells[rowIdx][currentCol] = tview.NewTableCell(entry.GetFormattedValue(header)).
+				SetTextColor(tcell.ColorBeige).
+				SetAlign(tview.AlignLeft)
+			currentCol++
+		}
+	}
+
+	for rowIdx, row := range cells {
+		for colIdx, cell := range row {
+			table.SetCell(rowIdx+1, colIdx, cell)
+		}
+	}
+
+	table.SetOffset(oldRowOffset, oldColOffset)
+
+	v.updateStatusBar(len(pageResults))
+	v.updateHeader()
 }

@@ -1,7 +1,6 @@
 package elastic
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
@@ -94,38 +93,31 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 
 		v.resetFieldState()
 
-		v.showLoading("Loading index stats...")
+		//v.showLoading("Loading index stats...")
 
-		go func() {
-			// First update the stats
-			if err := v.service.PreloadIndexStats(context.Background()); err != nil {
-				v.manager.Logger().Error("Error refreshing index stats", err)
-				v.manager.UpdateStatusBar(fmt.Sprintf("Error refreshing index stats: %v", err))
-			}
-
-			stats, err := v.service.GetIndexStats(context.Background(), pattern)
-			if err != nil {
-				v.manager.Logger().Error("Failed to get index stats", "error", err)
-			}
-
-			v.manager.App().QueueUpdateDraw(func() {
-				v.state.search.indexStats = stats
-				v.hideLoading()
-				v.doRefreshWithCurrentTimeframe()
-			})
-		}()
+		//go func() {
+		//	// First update the stats
+		//	if err := v.service.PreloadIndexStats(context.Background()); err != nil {
+		//		v.manager.Logger().Error("Error refreshing index stats", err)
+		//		v.manager.UpdateStatusBar(fmt.Sprintf("Error refreshing index stats: %v", err))
+		//	}
+		//
+		//	stats, err := v.service.GetIndexStats(context.Background(), pattern)
+		//	if err != nil {
+		//		v.manager.Logger().Error("Failed to get index stats", "error", err)
+		//	}
+		//
+		//	v.manager.App().QueueUpdateDraw(func() {
+		//		v.state.search.indexStats = stats
+		//		v.hideLoading()
+		//		v.doRefreshWithCurrentTimeframe()
+		//	})
+		//}()
+		v.doRefreshWithCurrentTimeframe()
 
 		return nil
 	}
 	return event
-}
-
-func (v *View) resetFieldState() {
-	v.state.data.originalFields = nil
-	v.state.data.fieldOrder = nil
-	v.state.data.activeFields = make(map[string]bool)
-	v.components.fieldList.Clear()
-	v.components.selectedList.Clear()
 }
 
 func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
