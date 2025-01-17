@@ -1,6 +1,7 @@
 package spinner
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,7 +19,6 @@ type Spinner struct {
 	onComplete func()
 }
 
-// NewSpinner creates a new spinner component with the specified message
 func NewSpinner(message string) *Spinner {
 	spinner := &Spinner{
 		TextView: tview.NewTextView().
@@ -34,7 +34,6 @@ func NewSpinner(message string) *Spinner {
 	return spinner
 }
 
-// Start begins the spinner animation
 func (s *Spinner) Start(app *tview.Application) {
 	if !s.isLoading {
 		s.isLoading = true
@@ -42,7 +41,13 @@ func (s *Spinner) Start(app *tview.Application) {
 	}
 }
 
-// Stop halts the spinner animation and triggers the onComplete callback if set
+func (s *Spinner) StartWithContext(ctx context.Context, app *tview.Application) {
+	if !s.isLoading {
+		s.isLoading = true
+		go s.animateWithContext(ctx, app)
+	}
+}
+
 func (s *Spinner) Stop() {
 	if s.isLoading {
 		s.isLoading = false
@@ -56,17 +61,14 @@ func (s *Spinner) Stop() {
 	}
 }
 
-// SetMessage updates the spinner's message
 func (s *Spinner) SetMessage(message string) {
 	s.message = message
 }
 
-// SetOnComplete sets a callback function to be called when the spinner stops
 func (s *Spinner) SetOnComplete(fn func()) {
 	s.onComplete = fn
 }
 
-// IsLoading returns whether the spinner is currently active
 func (s *Spinner) IsLoading() bool {
 	return s.isLoading
 }
@@ -88,11 +90,44 @@ func (s *Spinner) animate(app *tview.Application) {
 	}
 }
 
-// CreateSpinnerModal creates a modal containing the spinner
-func CreateSpinnerModal(spinner *Spinner) *tview.Grid {
-	return tview.NewGrid().
-		SetColumns(0, 40, 0).
-		SetRows(0, 5, 0).
-		SetBorders(false).
-		AddItem(spinner, 1, 1, 1, 1, 0, 0, false)
+func (s *Spinner) animateWithContext(ctx context.Context, app *tview.Application) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.Stop()
+			return
+		case <-s.done:
+			return
+		case <-ticker.C:
+			app.QueueUpdateDraw(func() {
+				s.SetText(fmt.Sprintf("\n[yellow]%s[white] %s", s.message, s.frames[s.current]))
+			})
+			s.current = (s.current + 1) % len(s.frames)
+		}
+	}
+}
+
+func CreateSpinnerModal(spinner *Spinner) tview.Primitive {
+	// Create a simple frame for the spinner with no background
+	frame := tview.NewFrame(spinner).
+		SetBorders(0, 0, 0, 0, 0, 0)
+
+	// Use a Grid to center the spinner
+	grid := tview.NewGrid().
+		SetRows(0, 3, 0).     // 3 rows height for spinner
+		SetColumns(0, 50, 0). // 50 columns width for spinner
+		AddItem(frame, 1, 1, 1, 1, 0, 0, true)
+
+	// Input capture at the grid level
+	grid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			return event
+		}
+		return nil
+	})
+
+	return grid
 }

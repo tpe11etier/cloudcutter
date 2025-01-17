@@ -22,28 +22,27 @@ import (
 )
 
 const (
-	ViewEC2        = "ec2"
 	ViewDynamoDB   = "dynamodb"
 	ViewElastic    = "elastic"
-	ViewTest       = "test"
 	ModalCmdPrompt = "modalPrompt"
 	ModalJSON      = "modalJSON"
 )
 
 // Manager represents the main view manager
 type Manager struct {
-	app            *ui.App
-	ctx            context.Context
-	cancelFunc     context.CancelFunc
-	views          map[string]views.View
-	lazyViews      map[string]func() (views.View, error)
-	activeView     views.View
-	pages          *tview.Pages
-	layout         *tview.Flex
-	awsConfig      aws.Config
-	primitivesByID map[string]tview.Primitive
-	logger         *logger.Logger
-	spinner        *spinner.Spinner
+	app               *ui.App
+	ctx               context.Context
+	cancelFunc        context.CancelFunc
+	views             map[string]views.View
+	lazyViews         map[string]func() (views.View, error)
+	activeView        views.View
+	pages             *tview.Pages
+	layout            *tview.Flex
+	awsConfig         aws.Config
+	primitivesByID    map[string]tview.Primitive
+	logger            *logger.Logger
+	spinner           *spinner.Spinner
+	loadingCancelFunc context.CancelFunc
 
 	prompt       *components.Prompt
 	filterPrompt *components.Prompt
@@ -89,10 +88,13 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 
 	vm.profileHandler = profile.NewProfileHandler(
 		vm.StatusChan,
-		func(message string) { vm.showLoading(message) },
+		func(message string) {
+			vm.pages.RemovePage("profileSelector")
+			vm.showLoading(message)
+		},
 		func() { vm.hideLoading() },
 	)
-	
+
 	vm.initialize()
 	return vm
 }
@@ -116,7 +118,7 @@ func (vm *Manager) setupPrompts() {
 		if input == "" {
 			return nil
 		}
-		commands := []string{"profile", "region", "ec2", "dynamodb", "elastic", "test", "help", "exit"}
+		commands := []string{"profile", "region", "dynamodb", "elastic", "help", "exit"}
 		var matches []string
 		for _, cmd := range commands {
 			if strings.HasPrefix(cmd, input) {
@@ -181,7 +183,6 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 		"region":   vm.showRegionSelector,
 		"dynamodb": func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewDynamoDB) },
 		"elastic":  func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewElastic) },
-		"test":     func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewTest) },
 		"help": func() (tview.Primitive, error) {
 			vm.statusBar.SetText("Help: List of available commands...")
 			return nil, nil
@@ -583,32 +584,6 @@ func (vm *Manager) switchToDevProfile() error {
 	return nil
 }
 
-func (vm *Manager) switchToProdProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return fmt.Errorf(status)
-	}
-
-	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to prod profile: %v", err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "opal_prod")
-		if err := vm.reinitializeViews(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		vm.StatusChan <- "Successfully switched to prod profile"
-	})
-
-	return nil
-}
-
 func (vm *Manager) switchToLocalProfile() error {
 	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
@@ -661,11 +636,13 @@ func (vm *Manager) reinitializeViews() error {
 
 	return nil
 }
+
 func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
 		func(profile string) {
-			vm.pages.RemovePage("profileSelector")
+			// Remove this line since the loading start will handle hiding the modal
+			// vm.pages.RemovePage("profileSelector")
 			vm.app.SetFocus(vm.activeView.Content())
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
@@ -877,23 +854,91 @@ func (vm *Manager) showLoading(message string) {
 	if vm.spinner == nil {
 		vm.spinner = spinner.NewSpinner(message)
 		vm.spinner.SetOnComplete(func() {
-			pages := vm.Pages()
-			pages.RemovePage("loading")
+			vm.pages.RemovePage("loading")
+			if vm.loadingCancelFunc != nil {
+				vm.loadingCancelFunc()
+				vm.loadingCancelFunc = nil
+			}
 		})
 	} else {
 		vm.spinner.SetMessage(message)
 	}
 
 	if !vm.spinner.IsLoading() {
+		// Create a new context with cancellation
+		var ctx context.Context
+		ctx, vm.loadingCancelFunc = context.WithCancel(vm.ctx)
+
 		modal := spinner.CreateSpinnerModal(vm.spinner)
-		pages := vm.Pages()
-		pages.AddPage("loading", modal, true, true)
-		vm.spinner.Start(vm.App())
+		vm.pages.AddPage("loading", modal, true, true)
+		vm.app.SetFocus(modal)
+
+		// Start the spinner with the cancellable context
+		vm.spinner.StartWithContext(ctx, vm.App())
 	}
 }
 
 func (vm *Manager) hideLoading() {
 	if vm.spinner != nil {
+		if vm.loadingCancelFunc != nil {
+			vm.loadingCancelFunc()
+			vm.loadingCancelFunc = nil
+		}
 		vm.spinner.Stop()
 	}
+}
+
+func (vm *Manager) switchToProdProfile() error {
+	if vm.profileHandler.IsAuthenticating() {
+		status := "Authentication already in progress"
+		vm.StatusChan <- status
+		return fmt.Errorf(status)
+	}
+
+	// Hide modal immediately
+	vm.hideProfileSelector()
+
+	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
+		if err != nil {
+			vm.StatusChan <- fmt.Sprintf("Failed to switch to prod profile: %v", err)
+			return
+		}
+
+		vm.showLoading("Authenticating with prod profile...")
+		vm.awsConfig = cfg
+		vm.header.UpdateEnvVar("Profile", "opal_prod")
+
+		if vm.spinner == nil {
+			vm.spinner = spinner.NewSpinner("Loading Available Fields...")
+			vm.spinner.SetOnComplete(func() {
+				vm.pages.RemovePage("loading")
+				if vm.loadingCancelFunc != nil {
+					vm.loadingCancelFunc()
+					vm.loadingCancelFunc = nil
+				}
+			})
+		} else {
+			vm.spinner.SetMessage("Loading Available Fields...")
+		}
+
+		if !vm.spinner.IsLoading() {
+			var ctx context.Context
+			ctx, vm.loadingCancelFunc = context.WithCancel(vm.ctx)
+
+			modal := spinner.CreateSpinnerModal(vm.spinner)
+			vm.pages.AddPage("loading", modal, true, true)
+			vm.app.SetFocus(modal)
+
+			vm.spinner.StartWithContext(ctx, vm.App())
+		}
+
+		if err := vm.reinitializeViews(); err != nil {
+			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
+			return
+		}
+
+		vm.StatusChan <- "Successfully switched to prod profile"
+	})
+
+	return nil
 }

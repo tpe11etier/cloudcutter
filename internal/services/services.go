@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
-	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/ec2"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 )
 
 type Services struct {
-	EC2      *ec2.Service
 	DynamoDB dynamodb.Interface
 	Elastic  *elastic.Service
 	Region   string
@@ -18,7 +16,6 @@ type Services struct {
 func New(cfg aws.Config, region string) (*Services, error) {
 	cfg.Region = region
 
-	ec2Svc := ec2.NewService(cfg)
 	dynamoService := dynamodb.NewService(cfg)
 
 	elasticService, err := elastic.NewService(cfg)
@@ -27,7 +24,6 @@ func New(cfg aws.Config, region string) (*Services, error) {
 	}
 
 	return &Services{
-		EC2:      ec2Svc,
 		DynamoDB: dynamoService,
 		Elastic:  elasticService,
 		Region:   region,
@@ -35,7 +31,6 @@ func New(cfg aws.Config, region string) (*Services, error) {
 }
 
 func (s *Services) ReinitializeWithConfig(cfg aws.Config) {
-	s.EC2 = ec2.NewService(cfg)
 	s.DynamoDB = dynamodb.NewService(cfg)
 	if elasticService, err := elastic.NewService(cfg); err == nil {
 		s.Elastic = elasticService

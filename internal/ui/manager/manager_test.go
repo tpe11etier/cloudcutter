@@ -100,10 +100,8 @@ package manager
 //	vm, _ := setupTestManager(t)
 //
 //	views := map[string]*TestView{
-//		"ec2":      NewTestView(ViewEC2),
 //		"dynamodb": NewTestView(ViewDynamoDB),
 //		"elastic":  NewTestView(ViewElastic),
-//		"test":     NewTestView(ViewTest),
 //	}
 //
 //	for _, view := range views {
@@ -242,10 +240,8 @@ package manager
 //	vm, _ := setupTestManager(t)
 //
 //	views := map[string]*TestView{
-//		"ec2":      NewTestView(ViewEC2),
 //		"dynamodb": NewTestView(ViewDynamoDB),
 //		"elastic":  NewTestView(ViewElastic),
-//		"test":     NewTestView(ViewTest),
 //	}
 //
 //	for _, view := range views {
@@ -260,11 +256,6 @@ package manager
 //		expectStopped bool
 //	}{
 //		{
-//			name:       "switch to ec2 view",
-//			command:    "ec2",
-//			expectView: ViewEC2,
-//		},
-//		{
 //			name:       "switch to dynamodb view",
 //			command:    "dynamodb",
 //			expectView: ViewDynamoDB,
@@ -273,11 +264,6 @@ package manager
 //			name:       "switch to elastic view",
 //			command:    "elastic",
 //			expectView: ViewElastic,
-//		},
-//		{
-//			name:       "switch to test view",
-//			command:    "test",
-//			expectView: ViewTest,
 //		},
 //		{
 //			name:         "help command",

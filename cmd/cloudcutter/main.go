@@ -31,10 +31,10 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&debugLevel, "debug", "info", "Set the debug level (e.g., debug, info, warn, error)")
-	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
+	rootCmd.PersistentFlags().StringVar(&debugLevel, "logging", "info", "Set the debug level (e.g., debug, info, warn, error)")
+	viper.BindPFlag("logging", rootCmd.PersistentFlags().Lookup("logging"))
 
-	viper.SetDefault("debug", "info")
+	viper.SetDefault("logging", "info")
 	viper.AutomaticEnv()
 }
 
@@ -49,7 +49,7 @@ func runApplication() {
 
 	logDir := "./logs"
 	logPrefix := "cloudcutter"
-	logLevel := strings.ToLower(viper.GetString("debug"))
+	logLevel := strings.ToLower(viper.GetString("logging"))
 
 	level, err := logger.ParseLevel(logLevel)
 	if err != nil {
