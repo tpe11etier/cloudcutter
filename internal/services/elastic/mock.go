@@ -10,7 +10,7 @@ type MockESClient struct {
 	SearchFunc      func(o ...func(*http.Request)) (*http.Response, error)
 	ClearScrollFunc func(o ...func(*http.Request)) (*http.Response, error)
 	ScrollFunc      func(o ...func(*http.Request)) (*http.Response, error)
-	CatIndicesFunc  func(o ...func(*http.Request)) (*http.Response, error) // Add this if needed
+	CatIndicesFunc  func(o ...func(*http.Request)) (*http.Response, error)
 }
 
 func (m *MockESClient) Get(index string, id string, o ...func(*http.Request)) (*http.Response, error) {

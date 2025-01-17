@@ -641,8 +641,6 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
 		func(profile string) {
-			// Remove this line since the loading start will handle hiding the modal
-			// vm.pages.RemovePage("profileSelector")
 			vm.app.SetFocus(vm.activeView.Content())
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))

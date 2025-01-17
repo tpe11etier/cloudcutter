@@ -596,7 +596,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 				v.manager.SetFocus(v.components.filterInput)
 			default:
 				v.manager.HideAllModals()
-				v.manager.App().SetFocus(v.components.resultsTable)
+				v.manager.App().SetFocus(v.components.filterInput)
 			}
 			return nil
 		}
@@ -1175,7 +1175,7 @@ func (v *View) hideLoading() {
 }
 
 func (v *View) Show() {
-	v.manager.App().SetFocus(v.components.filterInput)
+	v.manager.SetFocus(v.components.filterInput)
 	v.refreshResults()
 }
 
@@ -1599,7 +1599,7 @@ func (v *View) refreshResults() {
 	v.state.ui.isLoading = true
 	v.state.mu.Unlock()
 
-	currentFocus := v.manager.App().GetFocus()
+	intended := v.components.filterInput
 	v.showLoading("Refreshing results")
 
 	go func() {
@@ -1609,7 +1609,7 @@ func (v *View) refreshResults() {
 			v.state.mu.Unlock()
 			v.hideLoading()
 			v.manager.App().QueueUpdateDraw(func() {
-				v.manager.App().SetFocus(currentFocus)
+				v.manager.SetFocus(intended)
 			})
 		}()
 
