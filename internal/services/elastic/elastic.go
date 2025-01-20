@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/viper"
+	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,6 +23,7 @@ import (
 
 type Service struct {
 	Client *elasticsearch.Client
+	log    *logger.Logger
 	cache  map[string]*IndexStats
 	mu     sync.RWMutex
 }
@@ -32,15 +35,38 @@ type awsTransport struct {
 }
 
 func NewService(cfg aws.Config) (*Service, error) {
-	var esConfig elasticsearch.Config
+	logDir := viper.GetString("log_dir")
+	if logDir == "" {
+		logDir = "./logs"
+	}
+	logPrefix := "es_svc"
+	logLevel := strings.ToLower(viper.GetString("logging"))
+	level, err := logger.ParseLevel(logLevel)
+	if err != nil {
+		level = logger.INFO
+	}
 
-	// Check if we're using a local profile
+	logCfg := logger.Config{
+		LogDir: logDir,
+		Prefix: logPrefix,
+		Level:  level,
+	}
+
+	l, err := logger.New(logCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
+	var esConfig elasticsearch.Config
+	var client *elasticsearch.Client
+
 	if cfg.Region == "local" {
+		l.Debug("Configuring local elasticsearch connection")
 		esConfig = elasticsearch.Config{
 			Addresses: []string{"http://localhost:9200"},
 		}
 	} else {
-		// AWS environment setup
+		l.Debug("Configuring AWS elasticsearch connection for region: %s", cfg.Region)
 		transport := &awsTransport{
 			client: &http.Client{},
 			cfg:    cfg,
@@ -55,18 +81,25 @@ func NewService(cfg aws.Config) (*Service, error) {
 		}
 	}
 
-	client, err := elasticsearch.NewClient(esConfig)
+	client, err = elasticsearch.NewClient(esConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error creating Elasticsearch client: %v", err)
+		l.Warn("Failed to create Elasticsearch client: %v", err)
+		// Continue with nil client - service will operate in no-op mode
 	}
+
 	s := &Service{
 		Client: client,
+		log:    l,
 		cache:  make(map[string]*IndexStats),
 		mu:     sync.RWMutex{},
 	}
 
-	if err := s.PreloadIndexStats(context.Background()); err != nil {
-		return s, fmt.Errorf("initial cache preload failed: %w", err)
+	// Try to preload if we have a client
+	if client != nil {
+		if err := s.PreloadIndexStats(context.Background()); err != nil {
+			l.Warn("Initial cache preload failed: %v", err)
+			// Continue without preloaded cache
+		}
 	}
 
 	return s, nil
@@ -151,53 +184,80 @@ func hashPayload(b []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *Service) SearchDocuments(ctx context.Context, index string, query map[string]any) ([]map[string]any, int, error) {
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to marshal query: %w", err)
-	}
-
-	res, err := s.Client.Search(
-		s.Client.Search.WithContext(ctx),
-		s.Client.Search.WithIndex(index),
-		s.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-	)
-	if err != nil {
-		return nil, 0, fmt.Errorf("search request failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	var result struct {
-		Hits struct {
-			Total int `json:"total"`
-			Hits  []struct {
-				Source json.RawMessage `json:"_source"`
-			} `json:"hits"`
-		} `json:"hits"`
-	}
-
-	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return nil, 0, fmt.Errorf("decoding response failed: %w", err)
-	}
-
-	docs := make([]map[string]any, 0, len(result.Hits.Hits))
-	for _, hit := range result.Hits.Hits {
-		var doc map[string]any
-		if err := json.Unmarshal(hit.Source, &doc); err != nil {
-			// Skip malformed documents
-			continue
-		}
-		docs = append(docs, doc)
-	}
-
-	return docs, result.Hits.Total, nil
-}
+//func (s *Service) SearchDocuments(ctx context.Context, index string, query map[string]any) ([]map[string]any, int, error) {
+//	if s.Client == nil {
+//		s.log.Debug("SearchDocuments called in no-op mode")
+//		return []map[string]any{}, 0, nil
+//	}
+//
+//	s.log.Debug("Searching index %s with query: %v", index, query)
+//	queryJSON, err := json.Marshal(query)
+//	if err != nil {
+//		return nil, 0, fmt.Errorf("failed to marshal query: %w", err)
+//	}
+//
+//	res, err := s.Client.Search(
+//		s.Client.Search.WithContext(ctx),
+//		s.Client.Search.WithIndex(index),
+//		s.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
+//	)
+//	if err != nil {
+//		s.log.Error("Search request failed: %v", err)
+//		return nil, 0, fmt.Errorf("search request failed: %w", err)
+//	}
+//	defer res.Body.Close()
+//
+//	var result struct {
+//		Hits struct {
+//			Total struct {
+//				Value    int    `json:"value"`
+//				Relation string `json:"relation"`
+//			} `json:"total"`
+//			Hits []struct {
+//				Source json.RawMessage `json:"_source"`
+//			} `json:"hits"`
+//		} `json:"hits"`
+//	}
+//
+//	//var result struct {
+//	//	Hits struct {
+//	//		Total int `json:"total"`
+//	//		Hits  []struct {
+//	//			Source json.RawMessage `json:"_source"`
+//	//		} `json:"hits"`
+//	//	} `json:"hits"`
+//	//}
+//
+//	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+//		s.log.Error("Failed to decode search response: %v", err)
+//		return nil, 0, fmt.Errorf("decoding response failed: %w", err)
+//	}
+//
+//	docs := make([]map[string]any, 0, len(result.Hits.Hits))
+//	for i, hit := range result.Hits.Hits {
+//		var doc map[string]any
+//		if err := json.Unmarshal(hit.Source, &doc); err != nil {
+//			s.log.Warn("Failed to unmarshal document %d: %v", i, err)
+//			continue
+//		}
+//		docs = append(docs, doc)
+//	}
+//
+//	s.log.Debug("Search returned %d documents", len(docs))
+//	return docs, result.Hits.Total.Value, nil
+//}
 
 func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, error) {
+	if s.Client == nil {
+		s.log.Debug("ListIndices called in no-op mode")
+		return []string{}, nil
+	}
+
 	if pattern == "" {
 		pattern = "*"
 	}
 
+	s.log.Debug("Listing indices with pattern: %s", pattern)
 	res, err := s.Client.Cat.Indices(
 		s.Client.Cat.Indices.WithContext(ctx),
 		s.Client.Cat.Indices.WithFormat("json"),
@@ -207,6 +267,7 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		s.Client.Cat.Indices.WithIndex(pattern),
 	)
 	if err != nil {
+		s.log.Error("Failed to list indices: %v", err)
 		return nil, fmt.Errorf("failed to list indices: %w", err)
 	}
 	defer res.Body.Close()
@@ -215,13 +276,16 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		Index string `json:"index"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&indices); err != nil {
+		s.log.Error("Failed to decode indices response: %v", err)
 		return nil, fmt.Errorf("decoding indices response failed: %w", err)
 	}
 
-	var names []string
+	names := make([]string, 0, len(indices))
 	for _, idx := range indices {
 		names = append(names, idx.Index)
 	}
+
+	s.log.Debug("Found %d indices", len(names))
 	return names, nil
 }
 
@@ -288,6 +352,12 @@ func (s *Service) Close() error {
 }
 
 func (s *Service) PreloadIndexStats(ctx context.Context) error {
+	if s.Client == nil {
+		s.log.Debug("PreloadIndexStats called in no-op mode")
+		return nil
+	}
+
+	s.log.Debug("Starting index stats preload")
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -309,12 +379,10 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 
 	newCache := make(map[string]*IndexStats)
 
-	// store all concrete indices
 	for _, stat := range stats {
 		newCache[stat.Index] = &stat
 	}
 
-	// Then handle patterns by finding all matching indices
 	patternGroups := make(map[string][]string)
 	for _, stat := range stats {
 		for existingIndex := range newCache {
@@ -372,8 +440,19 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 }
 
 func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*IndexStats, error) {
+	if s.Client == nil {
+		s.log.Debug("GetIndexStats called in no-op mode")
+		return &IndexStats{
+			Health: "unknown",
+			Status: "unknown",
+			Index:  indexPattern,
+		}, nil
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	s.log.Debug("Getting stats for index pattern: %s", indexPattern)
 
 	// try exact match first
 	if stats, ok := s.cache[indexPattern]; ok {

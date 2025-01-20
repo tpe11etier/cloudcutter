@@ -8,32 +8,50 @@ import (
 )
 
 type Services struct {
-	DynamoDB dynamodb.Interface
-	Elastic  *elastic.Service
-	Region   string
+	DynamoDB    dynamodb.Interface
+	Elastic     *elastic.Service
+	Region      string
+	currentView string
 }
 
 func New(cfg aws.Config, region string) (*Services, error) {
 	cfg.Region = region
 
-	dynamoService := dynamodb.NewService(cfg)
-
-	elasticService, err := elastic.NewService(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("error creating Elasticsearch service: %v", err)
-	}
-
 	return &Services{
-		DynamoDB: dynamoService,
-		Elastic:  elasticService,
-		Region:   region,
+		Region: region,
 	}, nil
 }
 
-func (s *Services) ReinitializeWithConfig(cfg aws.Config) {
-	s.DynamoDB = dynamodb.NewService(cfg)
-	if elasticService, err := elastic.NewService(cfg); err == nil {
+func (s *Services) InitializeDynamoDB(cfg aws.Config) {
+	if s.DynamoDB == nil {
+		s.DynamoDB = dynamodb.NewService(cfg)
+	}
+}
+
+func (s *Services) InitializeElastic(cfg aws.Config) error {
+	if s.Elastic == nil {
+		elasticService, err := elastic.NewService(cfg)
+		if err != nil {
+			return fmt.Errorf("error creating Elasticsearch service: %v", err)
+		}
 		s.Elastic = elasticService
 	}
+	return nil
+}
+
+func (s *Services) ReinitializeWithConfig(cfg aws.Config, viewName string) error {
 	s.Region = cfg.Region
+
+	switch viewName {
+	case "dynamodb":
+		s.DynamoDB = dynamodb.NewService(cfg)
+	case "elastic":
+		elasticService, err := elastic.NewService(cfg)
+		if err != nil {
+			return fmt.Errorf("error creating Elasticsearch service: %v", err)
+		}
+		s.Elastic = elasticService
+	}
+
+	return nil
 }

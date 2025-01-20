@@ -13,8 +13,8 @@ func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 	case v.components.filterInput:
 		v.manager.App().SetFocus(v.components.activeFilters)
 	case v.components.activeFilters:
-		v.manager.App().SetFocus(v.components.indexView)
-	case v.components.indexView:
+		v.manager.App().SetFocus(v.components.indexInput)
+	case v.components.indexInput:
 		v.manager.App().SetFocus(v.components.timeframeInput)
 	case v.components.timeframeInput:
 		v.manager.App().SetFocus(v.components.numResultsInput)
@@ -82,39 +82,21 @@ func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		pattern := v.components.indexView.GetText()
-		if pattern == "" {
-			return nil
+	if event.Key() == tcell.KeyEnter {
+		newIndex := v.components.indexInput.GetText()
+		if newIndex == "" {
+			return event
 		}
 
-		v.state.search.currentIndex = pattern
+		v.state.mu.Lock()
+		indexChanged := newIndex != v.state.search.currentIndex
+		v.state.search.currentIndex = newIndex
+		v.state.mu.Unlock()
 
-		v.resetFieldState()
-
-		//v.showLoading("Loading index stats...")
-
-		//go func() {
-		//	// First update the stats
-		//	if err := v.service.PreloadIndexStats(context.Background()); err != nil {
-		//		v.manager.Logger().Error("Error refreshing index stats", err)
-		//		v.manager.UpdateStatusBar(fmt.Sprintf("Error refreshing index stats: %v", err))
-		//	}
-		//
-		//	stats, err := v.service.GetIndexStats(context.Background(), pattern)
-		//	if err != nil {
-		//		v.manager.Logger().Error("Failed to get index stats", "error", err)
-		//	}
-		//
-		//	v.manager.App().QueueUpdateDraw(func() {
-		//		v.state.search.indexStats = stats
-		//		v.hideLoading()
-		//		v.doRefreshWithCurrentTimeframe()
-		//	})
-		//}()
+		if indexChanged {
+			v.resetFieldState()
+		}
 		v.doRefreshWithCurrentTimeframe()
-
 		return nil
 	}
 	return event
@@ -127,6 +109,10 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 		case 'f':
 			v.toggleFieldList()
 			return nil
+		case 'a':
+			v.manager.SetFocus(v.components.fieldList)
+		case 's':
+			v.manager.SetFocus(v.components.selectedList)
 		}
 	case tcell.KeyEnter:
 		row, _ := v.components.resultsTable.GetSelection()
@@ -174,6 +160,12 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 
 func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
+	case tcell.KeyRune:
+		switch event.Rune() {
+		case 's':
+			v.manager.SetFocus(v.components.selectedList)
+		}
+
 	case tcell.KeyEnter:
 		// Field list only handles activation
 		index := v.components.fieldList.GetCurrentItem()
@@ -208,6 +200,8 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 				v.moveFieldPosition(mainText, false)
 			}
 			return nil
+		case 'a':
+			v.manager.SetFocus(v.components.fieldList)
 		}
 	case tcell.KeyEnter:
 		// Selected list only handles deactivation
@@ -216,6 +210,24 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 			mainText, _ := v.components.selectedList.GetItemText(index)
 			v.toggleField(mainText) // Deactivate when Enter pressed in selected list
 		}
+		return nil
+	}
+	return event
+}
+
+func (v *View) handleLocalFilterInput(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyEsc:
+		v.manager.SetFocus(v.components.filterInput)
+		return nil
+	}
+	return event
+}
+
+func (v *View) handleTimeframeInput(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyEsc:
+		v.manager.SetFocus(v.components.filterInput)
 		return nil
 	}
 	return event

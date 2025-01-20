@@ -6,7 +6,6 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
 )
 
-// ManagerInterface defines the methods from the Manager struct that RegionSelector needs to interact with
 type ManagerInterface interface {
 	Pages() *tview.Pages
 	App() *tview.Application

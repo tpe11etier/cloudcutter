@@ -28,7 +28,6 @@ const (
 	ModalJSON      = "modalJSON"
 )
 
-// Manager represents the main view manager
 type Manager struct {
 	app               *ui.App
 	ctx               context.Context
@@ -206,7 +205,6 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 	return nil
 }
 
-// Run starts the application
 func (vm *Manager) Run() error {
 	vm.app.SetRoot(vm.layout, true)
 	vm.app.EnableMouse(true)
@@ -380,7 +378,6 @@ func (vm *Manager) buildPrimitiveFromComponent(c types.Component) tview.Primitiv
 					}
 					vm.help.SetContextHelp(helpCategory)
 					if c.HelpProps != nil {
-						// Set all properties at once
 						c.HelpProps.Commands = c.Help
 						vm.help.SetProperties(*c.HelpProps)
 					} else {
@@ -518,6 +515,11 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			vm.hideProfileSelector()
 			return nil
 		}
+		if vm.pages.HasPage(ModalJSON) {
+			vm.hideJSON()
+			return nil
+		}
+
 		if vm.help.IsVisible() {
 			vm.help.Hide(vm.pages)
 			vm.app.SetFocus(currentFocus)
@@ -591,15 +593,20 @@ func (vm *Manager) switchToLocalProfile() error {
 		return fmt.Errorf(status)
 	}
 
+	vm.logger.Info("Starting local profile switch") // Add logging
 	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
+		vm.logger.Info("Inside local profile callback") // Add logging
 		if err != nil {
+			vm.logger.Error("Failed to switch to local profile", "error", err) // Add logging
 			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
 			return
 		}
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "local")
+		vm.logger.Info("About to reinitialize views") // Add logging
 		if err := vm.reinitializeViews(); err != nil {
+			vm.logger.Error("Error reinitializing views", "error", err) // Add logging
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
 			return
 		}
@@ -659,21 +666,23 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 			vm.app.SetFocus(vm.activeView.Content())
 		},
 		vm.statusBar,
+		vm,
 	)
 
-	numEntries := profileSelector.GetItemCount() + 2
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(profileSelector, 30, 0, true).
-			AddItem(nil, 0, 1, false),
-			numEntries, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	vm.pages.AddPage("profileSelector", modal, true, true)
-	return profileSelector, nil
+	//numEntries := profileSelector.GetItemCount() + 2
+	//modal := tview.NewFlex().
+	//	SetDirection(tview.FlexRow).
+	//	AddItem(nil, 0, 1, false).
+	//	AddItem(tview.NewFlex().
+	//		AddItem(nil, 0, 1, false).
+	//		AddItem(profileSelector, 30, 0, true).
+	//		AddItem(nil, 0, 1, false),
+	//		numEntries, 1, true).
+	//	AddItem(nil, 0, 1, false)
+	//
+	//vm.pages.AddPage("profileSelector", modal, true, true)
+	//return profileSelector, nil
+	return profileSelector.ShowSelector()
 }
 
 func (vm *Manager) hideProfileSelector() {
@@ -692,6 +701,9 @@ func (vm *Manager) hideHelp() {
 
 func (vm *Manager) hideJSON() {
 	vm.pages.RemovePage(ModalJSON)
+	if resultsTable := vm.GetPrimitiveByID("resultsTable"); resultsTable != nil {
+		vm.app.SetFocus(resultsTable)
+	}
 }
 
 func (vm *Manager) hideRowDetails() {
@@ -783,7 +795,6 @@ func applyStyleToBox(box tview.Primitive, style types.BaseStyle) {
 
 func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 	regionSelector := region.NewRegionSelector(
-		// First argument: func
 		func(region string) {
 			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
 			if err := vm.UpdateRegion(region); err != nil {
@@ -792,29 +803,15 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 				vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
 			}
 		},
-		// Second argument: func()
 		func() {
 			vm.pages.RemovePage("regionSelector")
 			vm.app.SetFocus(vm.activeView.Content())
 		},
-		// Third argument: *statusbar.StatusBar
 		vm.statusBar,
-		vm, // Fourth argument: ManagerInterface
+		vm,
 	)
 
-	numEntries := regionSelector.GetItemCount() + 2
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(regionSelector, 30, 0, true).
-			AddItem(nil, 0, 1, false),
-			numEntries, 1, true).
-		AddItem(nil, 0, 1, false)
-
-	vm.pages.AddPage("regionSelector", modal, true, true)
-	return regionSelector, nil
+	return regionSelector.ShowRegionSelector()
 }
 
 func (vm *Manager) hideRegionSelector() {
@@ -863,7 +860,6 @@ func (vm *Manager) showLoading(message string) {
 	}
 
 	if !vm.spinner.IsLoading() {
-		// Create a new context with cancellation
 		var ctx context.Context
 		ctx, vm.loadingCancelFunc = context.WithCancel(vm.ctx)
 
@@ -893,7 +889,6 @@ func (vm *Manager) switchToProdProfile() error {
 		return fmt.Errorf(status)
 	}
 
-	// Hide modal immediately
 	vm.hideProfileSelector()
 
 	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {

@@ -80,18 +80,21 @@ func runApplication() {
 	}
 
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
+		services.InitializeDynamoDB(awsConfig)
 		return ddbv.NewView(viewManager, services.DynamoDB), nil
 	})
 
 	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
+		if err := services.InitializeElastic(awsConfig); err != nil {
+			return nil, err
+		}
 		return elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
 	})
 
 	// Set initial view
-	if err := viewManager.SwitchToView(manager.ViewDynamoDB); err != nil {
+	if err := viewManager.SwitchToView(manager.ViewElastic); err != nil {
 		log.Fatalf("Failed to set initial view: %v", err)
 	}
-
 	// Run the application
 	if err := viewManager.Run(); err != nil {
 		log.Fatalf("Application error: %v", err)

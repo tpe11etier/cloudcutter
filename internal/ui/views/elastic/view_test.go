@@ -41,7 +41,6 @@ func TestConcurrentFiltering(t *testing.T) {
 		}()
 	}
 
-	// Add a timeout to catch deadlocks
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()

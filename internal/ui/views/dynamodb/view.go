@@ -89,7 +89,6 @@ func (v *View) Content() tview.Primitive {
 
 func (v *View) Show() {
 	v.manager.App().SetFocus(v.leftPanel)
-	// Only fetch if we need to
 	if v.leftPanel.GetItemCount() == 0 {
 		v.fetchTables()
 	}
@@ -576,7 +575,6 @@ func (v *View) showTableItems(tableName string) {
 	go func() {
 		items, err := v.service.ScanTable(v.ctx, tableName)
 
-		// Make sure UI updates happen in the main thread
 		v.manager.App().QueueUpdateDraw(func() {
 			defer v.hideLoading()
 
@@ -600,7 +598,6 @@ func (v *View) showTableItems(tableName string) {
 func (v *View) Reinitialize(cfg aws.Config) error {
 	v.service = dynamodb.NewService(cfg)
 
-	// Clear out old table info and UI
 	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.state.originalItems = nil
 	v.state.filteredItems = nil
@@ -717,7 +714,7 @@ func (v *View) calculateVisibleRows() {
 
 func (v *View) toggleRowNumbers() {
 	v.state.showRowNumbers = !v.state.showRowNumbers
-	v.updateDataTableForItems(v.state.filteredItems) // Refresh the display
+	v.updateDataTableForItems(v.state.filteredItems)
 }
 
 func (v *View) nextPage() {
@@ -765,12 +762,10 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
-	// Create a new table for displaying item details
 	table := tview.NewTable()
 	table.SetSelectable(true, false).
-		SetFixed(1, 0) // Fix the header row
+		SetFixed(1, 0)
 
-	// Extract the attribute names from the item
 	attributes := make([]string, 0, len(item))
 	for attr := range item {
 		attributes = append(attributes, attr)
@@ -790,10 +785,9 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 		}
 	}
 
-	// Set a maximum width to prevent overly wide modals
 	const minModalWidth = 50
 	const maxModalWidth = 120
-	calculatedWidth := maxAttrLen + maxValLen + 4 // Additional padding
+	calculatedWidth := maxAttrLen + maxValLen + 4
 	if calculatedWidth > maxModalWidth {
 		calculatedWidth = maxModalWidth
 	}
@@ -801,18 +795,15 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 		calculatedWidth = minModalWidth
 	}
 
-	// Populate the table with attribute-value pairs
 	for row, attr := range attributes {
 		value := attributeValueToString(item[attr])
 
-		// Attribute cell
 		attrCell := tview.NewTableCell(attr).
 			SetTextColor(tcell.ColorMediumTurquoise).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		table.SetCell(row+1, 0, attrCell)
 
-		// Value cell
 		valueCell := tview.NewTableCell(value).
 			SetTextColor(tcell.ColorBeige).
 			SetAlign(tview.AlignLeft).
@@ -821,7 +812,6 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 		table.SetCell(row+1, 1, valueCell)
 	}
 
-	// Add borders and title for the table
 	table.SetBorder(true).
 		SetTitle(" Item Details (ESC to close, 'y' to copy value) ").
 		SetTitleColor(style.GruvboxMaterial.Yellow).
@@ -831,7 +821,6 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 	// Add extra rows for padding and header
 	modalHeight := len(attributes) + 4 // 1 for header, 2 for padding, 1 buffer
 
-	// Set a minimum and maximum height to ensure the modal isn't too small or too large
 	const minModalHeight = 10
 	const maxModalHeight = 30
 	if modalHeight < minModalHeight {
@@ -844,7 +833,6 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 		v.manager.App().SetFocus(v.dataTable)
 	})
 
-	// Handle key events for the table
 	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyRune:
@@ -872,14 +860,12 @@ func (v *View) showModal(modal tview.Primitive, name string, width, height int, 
 		return
 	}
 
-	// Create a new grid to center the modal
 	modalGrid := tview.NewGrid().
 		SetRows(0, height, 0).
 		SetColumns(0, width, 0).
 		SetBorders(false).
 		AddItem(modal, 1, 1, 1, 1, 0, 0, true)
 
-	// Set input capture to handle dismissal
 	modalGrid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEsc {
 			v.manager.Pages().RemovePage(name)
@@ -944,7 +930,6 @@ func (v *View) filterItems(filter string) {
 
 	v.manager.UpdateStatusBar(statusMsg)
 
-	// Ensure the dataTable is selectable and select the first row
 	if len(filtered) > 0 {
 		v.dataTable.Select(1, 0)
 		v.dataTable.SetSelectable(true, false)

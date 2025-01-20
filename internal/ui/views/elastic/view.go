@@ -52,7 +52,7 @@ type viewComponents struct {
 	content          *tview.Flex
 	filterInput      *tview.InputField
 	activeFilters    *tview.TextView
-	indexView        *tview.InputField
+	indexInput       *tview.InputField
 	fieldList        *tview.List
 	selectedList     *tview.List
 	resultsTable     *tview.Table
@@ -247,7 +247,7 @@ func (v *View) setupLayout() {
 						Children: []types.Component{
 							// Index Input
 							{
-								ID:         "indexView",
+								ID:         "indexInput",
 								Type:       types.ComponentInputField,
 								Proportion: 1,
 								Style: types.InputFieldStyle{
@@ -275,13 +275,6 @@ func (v *View) setupLayout() {
 									},
 									OnBlur: func(inputField *tview.InputField) {
 										inputField.SetBorderColor(tcell.ColorBeige)
-									},
-									DoneFunc: func(s string) {
-										if s != "" {
-											v.state.search.currentIndex = s
-											v.resetFieldState()
-											v.doRefreshWithCurrentTimeframe()
-										}
 									},
 								},
 								Help: getIndices(v),
@@ -314,14 +307,15 @@ func (v *View) setupLayout() {
 										inputField.SetBorderColor(tcell.ColorBeige)
 									},
 									DoneFunc: func(s string) {
-										s = strings.TrimSpace(s)
-										if s != "" {
-											if _, err := ParseTimeframe(s); err != nil {
-												v.manager.UpdateStatusBar(fmt.Sprintf("Invalid timeframe: %v", err))
-												return
-											}
+										if s == "" {
+											return
 										}
-										v.doRefreshWithCurrentTimeframe()
+										// Only do the reset if it's a truly new index:
+										if s != v.state.search.currentIndex {
+											v.state.search.currentIndex = s
+											v.resetFieldState()
+											v.doRefreshWithCurrentTimeframe()
+										}
 									},
 								},
 								Help: []help.Command{
@@ -428,7 +422,7 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "Available Fields (Enter to select)",
+										Title:       "(A)vailable Fields (Enter to select)",
 										TitleColor:  style.GruvboxMaterial.Yellow,
 										TextColor:   tcell.ColorBeige,
 									},
@@ -452,7 +446,7 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "Selected Fields (j↓/k↑ to order)",
+										Title:       "(S)elected Fields (j↓/k↑ to order)",
 										TitleColor:  style.GruvboxMaterial.Yellow,
 										TextColor:   tcell.ColorBeige,
 									},
@@ -503,7 +497,7 @@ func (v *View) setupLayout() {
 
 	v.components.filterInput = v.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	v.components.activeFilters = v.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
-	v.components.indexView = v.manager.GetPrimitiveByID("indexView").(*tview.InputField)
+	v.components.indexInput = v.manager.GetPrimitiveByID("indexInput").(*tview.InputField)
 	v.components.localFilterInput = v.manager.GetPrimitiveByID("localFilterInput").(*tview.InputField)
 	v.components.timeframeInput = v.manager.GetPrimitiveByID("timeframeInput").(*tview.InputField)
 	v.components.numResultsInput = v.manager.GetPrimitiveByID("numResultsInput").(*tview.InputField)
@@ -534,8 +528,8 @@ func (v *View) ActiveField() string {
 	switch currentFocus {
 	case v.components.filterInput:
 		return "filterInput"
-	case v.components.indexView:
-		return "indexView"
+	case v.components.indexInput:
+		return "indexInput"
 	case v.components.localFilterInput:
 		return "localFilterInput"
 	case v.components.timeframeInput:
@@ -596,7 +590,6 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 				v.manager.SetFocus(v.components.filterInput)
 			default:
 				v.manager.HideAllModals()
-				v.manager.App().SetFocus(v.components.filterInput)
 			}
 			return nil
 		}
@@ -606,18 +599,18 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			return v.handleFilterInput(event)
 		case v.components.activeFilters:
 			return v.handleActiveFilters(event)
-		case v.components.indexView:
+		case v.components.indexInput:
 			return v.handleIndexInput(event)
 		case v.components.fieldList:
 			return v.handleFieldList(event)
 		case v.components.selectedList:
 			return v.handleSelectedList(event)
 		case v.components.timeframeInput:
-			return event
+			return v.handleTimeframeInput(event)
 		case v.components.resultsTable:
 			return v.handleResultsTable(event)
 		case v.components.localFilterInput:
-			return event
+			return v.handleLocalFilterInput(event)
 		}
 
 		return event
@@ -770,64 +763,29 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 
 func (v *View) Reinitialize(cfg aws.Config) error {
 	if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing Elasticsearch service: %v", err))
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
 		return nil
 	}
 
-	// Clear all state and UI components
-	v.state = State{
-		pagination: PaginationState{
-			currentPage: 1,
-			pageSize:    50,
-			totalPages:  1,
-		},
-		ui: UIState{
-			showRowNumbers:  true,
-			isLoading:       false,
-			fieldListFilter: "",
-		},
-		data: DataState{
-			activeFields:     make(map[string]bool),
-			filters:          []string{},
-			currentResults:   []*DocEntry{},
-			fieldOrder:       []string{},
-			originalFields:   []string{},
-			fieldMatches:     []string{},
-			filteredResults:  []*DocEntry{},
-			displayedResults: []*DocEntry{},
-			columnCache:      make(map[string][]string),
-			fieldCache:       NewFieldCache(),
-		},
-		search: SearchState{
-			currentIndex:    v.state.search.currentIndex,
-			matchingIndices: []string{},
-			numResults:      1000,
-			timeframe:       "12h",
-		},
-		misc: MiscState{
-			visibleRows:       0,
-			lastDisplayHeight: 0,
-			spinner:           nil,
-			rateLimit:         NewRateLimiter(),
-		},
+	// If switching to local, clear timeframe
+	if cfg.Region == "local" {
+		v.components.timeframeInput.SetText("")
+		v.state.search.timeframe = ""
 	}
 
-	// Clear UI components
-	v.components.fieldList.Clear()
-	v.components.selectedList.Clear()
-	v.components.resultsTable.Clear()
-	v.components.activeFilters.SetText("No active filters")
-	v.components.localFilterInput.SetText("")
-	v.components.filterInput.SetText("")
+	// Clear current fields and reload
+	v.state.mu.Lock()
+	v.state.data.fieldCache = NewFieldCache()
+	v.state.data.originalFields = nil
+	v.state.data.fieldOrder = nil
+	v.state.mu.Unlock()
 
-	// Re-run initialization
-	if err := v.initFieldsSync(); err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Error initializing fields: %v", err))
+	if err := v.loadFields(); err != nil {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
 		return nil
 	}
 
 	v.refreshResults()
-	v.displayCurrentPage()
 	return nil
 }
 
@@ -906,8 +864,7 @@ func (v *View) showJSONModal(entry *DocEntry) {
 		return
 	}
 
-	// Colorize the JSON
-	coloredJSON := colorizeJSON(string(prettyJSON))
+	coloredJSON := style.ColorizeJSON(string(prettyJSON))
 
 	textView := tview.NewTextView()
 	textView.SetTitle("'y' to copy | 'Esc' to close").
@@ -933,9 +890,6 @@ func (v *View) showJSONModal(entry *DocEntry) {
 	grid.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEscape:
-			v.manager.HideAllModals()
-			v.manager.App().SetRoot(v.components.content, true)
-			v.manager.App().SetFocus(v.components.resultsTable)
 			return nil
 		case tcell.KeyRune:
 			if event.Rune() == 'y' {
@@ -967,12 +921,10 @@ func (v *View) displayFilteredResults(filterText string) {
 	}
 	v.state.data.currentFilter = filterText
 
-	// Work with copies while holding the lock
 	currentResults := make([]*DocEntry, len(v.state.data.filteredResults))
 	copy(currentResults, v.state.data.filteredResults)
 	v.state.mu.Unlock()
 
-	// Process without holding the lock
 	var filtered []*DocEntry
 	if filterText == "" {
 		filtered = currentResults
@@ -986,7 +938,6 @@ func (v *View) displayFilteredResults(filterText string) {
 		}
 	}
 
-	// Update state with results
 	v.state.mu.Lock()
 	v.state.data.displayedResults = filtered
 	v.state.pagination.currentPage = 1
@@ -1024,28 +975,6 @@ func (v *View) updateStatusBar(currentPageSize int) {
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)
-}
-
-func (v *View) calculateVisibleRows() {
-	// Get the current screen size
-	_, _, _, height := v.components.resultsTable.GetInnerRect()
-
-	if height == v.state.misc.lastDisplayHeight {
-		return // No need to recalculate if height hasn't changed
-	}
-
-	v.state.misc.lastDisplayHeight = height
-
-	// Subtract 1 for header row and 1 for border
-	v.state.misc.visibleRows = height - 2
-
-	// Ensure minimum of 1 row
-	if v.state.misc.visibleRows < 1 {
-		v.state.misc.visibleRows = 1
-	}
-
-	// Update page size to match visible rows
-	v.state.pagination.pageSize = v.state.misc.visibleRows
 }
 
 func (v *View) toggleRowNumbers() {
@@ -1103,45 +1032,6 @@ func (v *View) moveFieldPosition(field string, moveUp bool) {
 
 	// Refresh the results table since order changed
 	v.displayCurrentPage()
-}
-func (v *View) moveFieldInOrder(field string, isActive bool) {
-	// Early exit if fieldOrder not initialized
-	if v.state.data.fieldOrder == nil || len(v.state.data.fieldOrder) == 0 {
-		return
-	}
-
-	// Find position with early exit
-	currentPos := -1
-	for i, f := range v.state.data.fieldOrder {
-		if f == field {
-			currentPos = i
-			break
-		}
-	}
-	if currentPos == -1 {
-		return
-	}
-
-	newOrder := make([]string, 0, len(v.state.data.fieldOrder))
-
-	if isActive {
-		newOrder = append(newOrder, field)
-		newOrder = append(newOrder, v.state.data.fieldOrder[:currentPos]...)
-		if currentPos+1 < len(v.state.data.fieldOrder) {
-			newOrder = append(newOrder, v.state.data.fieldOrder[currentPos+1:]...)
-		}
-	} else {
-		newOrder = append(newOrder, v.state.data.fieldOrder[:currentPos]...)
-		if currentPos+1 < len(v.state.data.fieldOrder) {
-			newOrder = append(newOrder, v.state.data.fieldOrder[currentPos+1:]...)
-		}
-		newOrder = append(newOrder, field)
-	}
-
-	// Clear only necessary cache entries
-	delete(v.state.data.columnCache, field)
-
-	v.state.data.fieldOrder = newOrder
 }
 
 func (v *View) showLoading(message string) {
@@ -1314,7 +1204,7 @@ func (v *View) updateResultsLayout() {
 }
 
 func (v *View) getActiveHeaders() []string {
-	// Instead of using fieldOrder, get order from selected list
+	// get order from selected list
 	var headers []string
 	for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
 		text, _ := v.components.selectedList.GetItemText(i)
@@ -1387,7 +1277,7 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 		)
 		if err != nil {
 			lastErr = err
-			// Check if it's a rate limit error
+			// rate limit?
 			if strings.Contains(err.Error(), "429") {
 				v.state.misc.rateLimit.HandleTooManyRequests()
 				v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited, retrying in %v...", v.state.misc.rateLimit.GetRetryAfter()))
@@ -1404,7 +1294,7 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 			return nil, fmt.Errorf("error reading response body: %v", err)
 		}
 
-		// Check if response indicates rate limiting
+		// rate limit?
 		if res.StatusCode == 429 {
 			v.state.misc.rateLimit.HandleTooManyRequests()
 			v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited, retrying in %v...", v.state.misc.rateLimit.GetRetryAfter()))
@@ -1450,7 +1340,6 @@ func (v *View) initFieldsSync() error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, 2)
 
-	// Concurrent index listing
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -1465,7 +1354,6 @@ func (v *View) initFieldsSync() error {
 		v.state.mu.Unlock()
 	}()
 
-	// Load fields using field_caps API
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -1474,19 +1362,16 @@ func (v *View) initFieldsSync() error {
 			return
 		}
 
-		// Initialize UI components
 		v.manager.App().QueueUpdateDraw(func() {
 			v.rebuildFieldList()
 		})
 	}()
 
-	// Wait for all goroutines and check for errors
 	go func() {
 		wg.Wait()
 		close(errChan)
 	}()
 
-	// Return first error if any occurred
 	for err := range errChan {
 		if err != nil {
 			return err
@@ -1501,61 +1386,6 @@ func (v *View) Close() error {
 		return v.manager.Logger().Close()
 	}
 	return nil
-}
-
-func (v *View) updateIndexStats() {
-	stats, err := v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
-	if err != nil {
-		stats, err = v.service.GetIndexStats(context.Background(), v.state.search.currentIndex)
-		if err != nil {
-			v.manager.Logger().Error("Failed to get index stats after refresh", "error", err)
-			return
-		}
-	}
-	v.state.search.indexStats = stats
-}
-
-func colorizeJSON(jsonStr string) string {
-	lines := strings.Split(jsonStr, "\n")
-	var coloredLines []string
-
-	for _, line := range lines {
-		// Find the first double quote and colon to separate key and value
-		parts := strings.SplitN(line, ":", 2)
-
-		if len(parts) == 2 {
-			key := parts[0]
-			value := parts[1]
-
-			// Color the key
-			key = strings.ReplaceAll(key, `"`, fmt.Sprintf("[%s]\"[%s]", style.GruvboxMaterial.Blue, tcell.ColorReset))
-
-			// Color the value based on type
-			value = strings.TrimSpace(value)
-			switch {
-			case value == "null":
-				value = fmt.Sprintf("[%s]null[%s]", style.GruvboxMaterial.Red, tcell.ColorReset)
-			case value == "true" || value == "false":
-				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Purple, value, tcell.ColorReset)
-			case strings.HasPrefix(value, `"`):
-				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Green, value, tcell.ColorReset)
-			case strings.HasPrefix(value, "{") || strings.HasPrefix(value, "["):
-				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, value, tcell.ColorReset)
-			default: // Numbers
-				value = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Orange, value, tcell.ColorReset)
-			}
-
-			coloredLines = append(coloredLines, fmt.Sprintf("%s:%s", key, value))
-		} else {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "{" || trimmed == "}" || trimmed == "[" || trimmed == "]" || trimmed == "}," || trimmed == "]," {
-				line = fmt.Sprintf("[%s]%s[%s]", style.GruvboxMaterial.Yellow, line, tcell.ColorReset)
-			}
-			coloredLines = append(coloredLines, line)
-		}
-	}
-
-	return strings.Join(coloredLines, "\n")
 }
 
 func (v *View) initTimeframeState() {
@@ -1599,7 +1429,7 @@ func (v *View) refreshResults() {
 	v.state.ui.isLoading = true
 	v.state.mu.Unlock()
 
-	intended := v.components.filterInput
+	currentFocus := v.manager.App().GetFocus()
 	v.showLoading("Refreshing results")
 
 	go func() {
@@ -1609,7 +1439,7 @@ func (v *View) refreshResults() {
 			v.state.mu.Unlock()
 			v.hideLoading()
 			v.manager.App().QueueUpdateDraw(func() {
-				v.manager.SetFocus(intended)
+				v.manager.SetFocus(currentFocus)
 			})
 		}()
 
@@ -1625,7 +1455,6 @@ func (v *View) refreshResults() {
 		v.manager.Logger().Info("Results refreshed successfully",
 			"totalResults", len(searchResult.entries))
 
-		// Update fields based on results
 		v.updateFieldsFromResults(searchResult.entries)
 
 		// Update results state
@@ -1729,7 +1558,6 @@ func (v *View) loadFields() error {
 			return fmt.Errorf("error decoding field caps: %v", err)
 		}
 
-		// Update cache with new metadata
 		for field, types := range fieldCaps.Fields {
 			for typeName, meta := range types {
 				v.state.data.fieldCache.Set(field, &FieldMetadata{
@@ -1743,23 +1571,19 @@ func (v *View) loadFields() error {
 		}
 	}
 
-	// Process fields with locking
 	v.state.mu.Lock()
 	defer v.state.mu.Unlock()
 
-	// Create sorted list of active fields
 	fields := make([]string, 0, len(activeFields))
 	for field := range activeFields {
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
 
-	// Update state
 	v.state.data.originalFields = fields
 	v.state.data.fieldOrder = make([]string, len(fields))
 	copy(v.state.data.fieldOrder, fields)
 
-	// Update field metadata active status
 	for field := range activeFields {
 		if meta, ok := v.state.data.fieldCache.Get(field); ok {
 			meta.Active = true
@@ -1825,7 +1649,6 @@ func (v *View) updateFieldsFromResults(results []*DocEntry) {
 		}
 	}
 
-	// Clean up field selections
 	newActiveFields := make(map[string]bool)
 	for field := range v.state.data.activeFields {
 		if _, ok := newFields[field]; ok {
@@ -1834,7 +1657,6 @@ func (v *View) updateFieldsFromResults(results []*DocEntry) {
 	}
 	v.state.data.activeFields = newActiveFields
 
-	// Queue UI update
 	v.manager.App().QueueUpdateDraw(func() {
 		v.rebuildFieldList()
 	})
@@ -1847,7 +1669,6 @@ func (v *View) fetchRegularResults(query map[string]any, numResults int, index s
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Wait according to rate limit
 		v.state.misc.rateLimit.Wait()
 
 		var buf bytes.Buffer
@@ -1878,7 +1699,7 @@ func (v *View) fetchRegularResults(query map[string]any, numResults int, index s
 			return nil, fmt.Errorf("error reading response: %v", err)
 		}
 
-		// Check if response indicates rate limiting
+		// rate limit?
 		if res.StatusCode == 429 {
 			v.state.misc.rateLimit.HandleTooManyRequests()
 			v.manager.UpdateStatusBar(fmt.Sprintf("Rate limited (attempt %d/%d), retrying in %v...",
@@ -2021,7 +1842,6 @@ func (v *View) fetchLargeResults(query map[string]any, index string) (*searchRes
 		}
 
 		if len(scrollResult.Hits.Hits) == 0 {
-			// Clean up scroll
 			_, err := v.service.Client.ClearScroll(
 				v.service.Client.ClearScroll.WithScrollID(scrollID),
 			)
@@ -2068,7 +1888,6 @@ func (v *View) updateHeader() {
 		indexInfo = v.state.search.currentIndex
 	}
 
-	// Build summary items in a single pass
 	summary = append(summary,
 		types.SummaryItem{Key: "Index", Value: indexInfo},
 		types.SummaryItem{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
@@ -2078,65 +1897,6 @@ func (v *View) updateHeader() {
 	)
 
 	v.manager.UpdateHeader(summary)
-}
-
-func (v *View) executeBatchSearch(query map[string]any, index string) (*searchResult, error) {
-	const maxRetries = 3
-	var lastErr error
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		v.state.misc.rateLimit.Wait()
-
-		var buf bytes.Buffer
-		if err := json.NewEncoder(&buf).Encode(query); err != nil {
-			return nil, fmt.Errorf("error encoding query: %v", err)
-		}
-
-		res, err := v.service.Client.Search(
-			v.service.Client.Search.WithIndex(index),
-			v.service.Client.Search.WithBody(&buf),
-		)
-
-		if err != nil {
-			lastErr = err
-			if strings.Contains(err.Error(), "429") {
-				v.state.misc.rateLimit.HandleTooManyRequests()
-				continue
-			}
-			return nil, fmt.Errorf("search error: %v", err)
-		}
-
-		bodyBytes, err := io.ReadAll(res.Body)
-		res.Body.Close()
-
-		if err != nil {
-			return nil, fmt.Errorf("error reading response: %v", err)
-		}
-
-		if res.StatusCode == 429 {
-			v.state.misc.rateLimit.HandleTooManyRequests()
-			continue
-		}
-
-		v.state.misc.rateLimit.Reset()
-
-		var result elastic.ESSearchResult
-		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&result); err != nil {
-			return nil, fmt.Errorf("error decoding response: %v", err)
-		}
-
-		entries, err := v.processSearchResults(result.Hits.Hits)
-		if err != nil {
-			return nil, fmt.Errorf("error processing results: %v", err)
-		}
-
-		return &searchResult{
-			entries:   entries,
-			totalHits: result.Hits.GetTotalHits(),
-		}, nil
-	}
-
-	return nil, fmt.Errorf("max retries exceeded: %v", lastErr)
 }
 
 func (v *View) displayCurrentPage() {
@@ -2151,7 +1911,6 @@ func (v *View) displayCurrentPage() {
 		return
 	}
 
-	// Pre-calculate display headers with capacity hint
 	displayHeaders := make([]string, 0, len(headers)+1)
 	if v.state.ui.showRowNumbers {
 		displayHeaders = append(displayHeaders, "#")

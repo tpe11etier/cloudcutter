@@ -26,13 +26,11 @@ func NewStatusBar() *StatusBar {
 }
 
 func (sb *StatusBar) SetText(message string) {
-	// Add new message to history
 	sb.messages = append(sb.messages, message)
 	if len(sb.messages) > sb.maxMessages {
 		sb.messages = sb.messages[1:]
 	}
 
-	// Update display
 	sb.TextView.SetText(message)
 }
 
