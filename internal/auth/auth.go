@@ -61,7 +61,6 @@ func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region strin
 	}
 
 	a.sendStatus(fmt.Sprintf("Switching to profile %s in %s", profile, region))
-
 	var cfg aws.Config
 	var err error
 
