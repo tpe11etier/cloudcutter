@@ -387,13 +387,13 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 		s.Client.Cat.Indices.WithV(true),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to preload index stats:", "error", err)
+		return fmt.Errorf("failed to preload index stats: %s", err)
 	}
 	defer res.Body.Close()
 
 	var stats []IndexStats
 	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
-		return fmt.Errorf("failed to decode index stats:", "error", err)
+		return fmt.Errorf("failed to decode index stats: %s", err)
 	}
 
 	newCache := make(map[string]*IndexStats)
@@ -521,5 +521,5 @@ func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*Inde
 		}
 	}
 
-	return nil, fmt.Errorf("no stats found for index:", "pattern", indexPattern)
+	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
 }
