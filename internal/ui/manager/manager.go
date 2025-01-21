@@ -593,20 +593,20 @@ func (vm *Manager) switchToLocalProfile() error {
 		return fmt.Errorf(status)
 	}
 
-	vm.logger.Info("Starting local profile switch") // Add logging
+	vm.logger.Info("Starting local profile switch")
 	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
-		vm.logger.Info("Inside local profile callback") // Add logging
+		vm.logger.Info("Inside local profile callback")
 		if err != nil {
-			vm.logger.Error("Failed to switch to local profile", "error", err) // Add logging
+			vm.logger.Error("Failed to switch to local profile", "error", err)
 			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
 			return
 		}
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "local")
-		vm.logger.Info("About to reinitialize views") // Add logging
+		vm.logger.Info("About to reinitialize views")
 		if err := vm.reinitializeViews(); err != nil {
-			vm.logger.Error("Error reinitializing views", "error", err) // Add logging
+			vm.logger.Error("Error reinitializing views", "error", err)
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
 			return
 		}
@@ -669,19 +669,6 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 		vm,
 	)
 
-	//numEntries := profileSelector.GetItemCount() + 2
-	//modal := tview.NewFlex().
-	//	SetDirection(tview.FlexRow).
-	//	AddItem(nil, 0, 1, false).
-	//	AddItem(tview.NewFlex().
-	//		AddItem(nil, 0, 1, false).
-	//		AddItem(profileSelector, 30, 0, true).
-	//		AddItem(nil, 0, 1, false),
-	//		numEntries, 1, true).
-	//	AddItem(nil, 0, 1, false)
-	//
-	//vm.pages.AddPage("profileSelector", modal, true, true)
-	//return profileSelector, nil
 	return profileSelector.ShowSelector()
 }
 
@@ -730,19 +717,27 @@ func (vm *Manager) startStatusListener() {
 }
 
 func (vm *Manager) UpdateRegion(region string) error {
-	cfg := vm.awsConfig.Copy()
-	cfg.Region = region
+	vm.showLoading("Switching regions...")
 
-	vm.awsConfig = cfg
+	go func() {
+		cfg := vm.awsConfig.Copy()
+		cfg.Region = region
 
-	vm.header.UpdateEnvVar("Region", region)
+		vm.awsConfig = cfg
 
-	if err := vm.reinitializeViews(); err != nil {
-		vm.StatusChan <- fmt.Sprintf("Error reinitializing views with new region: %v", err)
-		return err
-	}
+		vm.App().QueueUpdateDraw(func() {
+			vm.header.UpdateEnvVar("Region", region)
+		})
 
-	vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
+		if err := vm.reinitializeViews(); err != nil {
+			vm.StatusChan <- fmt.Sprintf("Error reinitializing views with new region: %v", err)
+			return
+		}
+
+		vm.hideLoading()
+		vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
+	}()
+
 	return nil
 }
 
@@ -796,6 +791,11 @@ func applyStyleToBox(box tview.Primitive, style types.BaseStyle) {
 func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 	regionSelector := region.NewRegionSelector(
 		func(region string) {
+			// Hide first
+			vm.pages.RemovePage("regionSelector")
+			vm.app.SetFocus(vm.activeView.Content())
+
+			// Then do the update
 			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
 			if err := vm.UpdateRegion(region); err != nil {
 				vm.StatusChan <- fmt.Sprintf("Error switching region: %v", err)

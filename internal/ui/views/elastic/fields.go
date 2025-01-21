@@ -36,7 +36,7 @@ func (fc *FieldCache) Set(field string, metadata *FieldMetadata) {
 	fc.cache.Store(field, metadata)
 }
 
-func (v *View) resetFieldState() {
+func (v *View) resetFieldState() error {
 	v.state.mu.Lock()
 	v.state.data.ResetFields()
 	v.state.mu.Unlock()
@@ -44,14 +44,15 @@ func (v *View) resetFieldState() {
 	v.components.fieldList.Clear()
 	v.components.selectedList.Clear()
 
-	go func() {
-		if err := v.loadFields(); err != nil {
-			v.manager.Logger().Error("Failed to load fields for new index", "error", err)
-			v.manager.App().QueueUpdateDraw(func() {
-				v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
-			})
-		}
-	}()
+	if err := v.loadFields(); err != nil {
+		v.manager.Logger().Error("Failed to load fields for new index", "error", err)
+		v.manager.App().QueueUpdateDraw(func() {
+			v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
+		})
+		return err
+	}
+
+	return nil
 }
 
 func (v *View) loadFields() error {
@@ -138,9 +139,14 @@ func (v *View) loadFields() error {
 	v.state.data.fieldOrder = make([]string, len(fields))
 	copy(v.state.data.fieldOrder, fields)
 
+	v.manager.Logger().Debug("Fields loaded", "originalFields", v.state.data.originalFields, "fieldOrder", v.state.data.fieldOrder)
+
 	for field := range activeFields {
 		if meta, ok := v.state.data.fieldCache.Get(field); ok {
 			meta.Active = true
+			v.manager.Logger().Debug("Set field active", "field", field)
+		} else {
+			v.manager.Logger().Warn("Field metadata missing", "field", field)
 		}
 	}
 
@@ -152,6 +158,8 @@ func (v *View) loadFields() error {
 		}
 	}
 	v.state.data.activeFields = newActiveFields
+
+	v.manager.Logger().Debug("Active fields updated", "activeFields", v.state.data.activeFields)
 
 	return nil
 }
@@ -227,13 +235,18 @@ func (v *View) toggleFieldList() {
 
 func (v *View) rebuildFieldList() {
 	v.components.fieldList.Clear()
+	v.manager.Logger().Debug("Rebuilding field list", "fieldOrder", v.state.data.fieldOrder, "activeFields", v.state.data.activeFields)
+
 	for _, field := range v.state.data.fieldOrder {
 		if !v.state.data.activeFields[field] { // Only show non-selected fields
 			v.components.fieldList.AddItem(field, "", 0, func() {
 				v.toggleField(field)
 			})
+			v.manager.Logger().Debug("Added field to fieldList", "field", field)
 		}
 	}
+
+	v.manager.Logger().Debug("Field list rebuilt successfully")
 }
 
 func (v *View) toggleField(field string) {

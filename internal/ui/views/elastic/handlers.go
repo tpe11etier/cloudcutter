@@ -36,37 +36,48 @@ func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 }
 
 func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() != tcell.KeyEnter {
-		return event
-	}
-
-	text := v.components.filterInput.GetText()
-	if text == "" {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
 		return nil
 	}
 
-	v.state.mu.Lock()
-	if _, err := ParseFilter(text); err != nil {
+	switch event.Key() {
+	case tcell.KeyEsc:
+		v.components.filterInput.SetText("")
+		return nil
+	case tcell.KeyEnter:
+		text := v.components.filterInput.GetText()
+		if text == "" {
+			return nil
+		}
+
+		v.state.mu.Lock()
+		if _, err := ParseFilter(text); err != nil {
+			v.state.mu.Unlock()
+			v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
+			return nil
+		}
+
+		v.components.filterInput.SetText("")
+		v.addFilter(text)
 		v.state.mu.Unlock()
-		v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
+
+		if v.refreshWithCurrentTimeframe != nil {
+			v.refreshWithCurrentTimeframe()
+		}
 		return nil
 	}
-
-	v.components.filterInput.SetText("")
-	v.addFilter(text)
-	v.state.mu.Unlock()
-
-	// Only refresh if the function is set
-	if v.refreshWithCurrentTimeframe != nil {
-		v.refreshWithCurrentTimeframe()
-	}
-	return nil
+	return event
 }
 
 func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyEsc:
 		v.manager.SetFocus(v.components.filterInput)
+		return nil
 	case tcell.KeyDelete, tcell.KeyBackspace2, tcell.KeyBackspace:
 		if len(v.state.data.filters) > 0 {
 			v.deleteSelectedFilter()
@@ -82,10 +93,18 @@ func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() == tcell.KeyEnter {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
+	switch event.Key() {
+	case tcell.KeyEsc:
+		v.components.indexInput.SetText(v.state.search.currentIndex)
+		return nil
+	case tcell.KeyEnter:
 		newIndex := v.components.indexInput.GetText()
 		if newIndex == "" {
-			return event
+			return nil
 		}
 
 		v.state.mu.Lock()
@@ -94,15 +113,39 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 		v.state.mu.Unlock()
 
 		if indexChanged {
-			v.resetFieldState()
+			v.components.fieldList.Clear()
+			v.components.selectedList.Clear()
+			v.showLoading("Loading fields...")
+
+			go func() {
+				if err := v.loadFields(); err != nil {
+					v.manager.Logger().Error("Failed to load fields for new index", "error", err)
+					v.manager.App().QueueUpdateDraw(func() {
+						v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
+					})
+					return
+				}
+
+				v.manager.App().QueueUpdateDraw(func() {
+					v.rebuildFieldList()
+					v.manager.UpdateStatusBar("Fields loaded successfully")
+				})
+
+				v.doRefreshWithCurrentTimeframe()
+			}()
+		} else {
+			v.doRefreshWithCurrentTimeframe()
 		}
-		v.doRefreshWithCurrentTimeframe()
 		return nil
 	}
 	return event
 }
 
 func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
@@ -159,6 +202,10 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
@@ -183,6 +230,10 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
@@ -204,11 +255,10 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 			v.manager.SetFocus(v.components.fieldList)
 		}
 	case tcell.KeyEnter:
-		// Selected list only handles deactivation
 		index := v.components.selectedList.GetCurrentItem()
 		if index >= 0 {
 			mainText, _ := v.components.selectedList.GetItemText(index)
-			v.toggleField(mainText) // Deactivate when Enter pressed in selected list
+			v.toggleField(mainText)
 		}
 		return nil
 	}
@@ -216,6 +266,10 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleLocalFilterInput(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyEsc:
 		v.manager.SetFocus(v.components.filterInput)
@@ -225,9 +279,41 @@ func (v *View) handleLocalFilterInput(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) handleTimeframeInput(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
 	switch event.Key() {
 	case tcell.KeyEsc:
 		v.manager.SetFocus(v.components.filterInput)
+		return nil
+	}
+	return event
+}
+
+func (v *View) handleNumResultsInput(event *tcell.EventKey) *tcell.EventKey {
+	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
+		return nil
+	}
+
+	switch event.Key() {
+	case tcell.KeyEsc:
+		v.manager.SetFocus(v.components.filterInput)
+		return nil
+	}
+	return event
+}
+
+func (v *View) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyCtrlA:
+		v.manager.SetFocus(v.components.fieldList)
+		return nil
+	case tcell.KeyCtrlS:
+		v.manager.SetFocus(v.components.selectedList)
+		return nil
+	case tcell.KeyCtrlR:
+		v.manager.SetFocus(v.components.resultsTable)
 		return nil
 	}
 	return event

@@ -47,19 +47,17 @@ func NewRegionSelector(onSelect func(string), onCancel func(), statusBar *status
 	selector.SetTitleAlign(tview.AlignLeft)
 	selector.SetBorderColor(tcell.ColorMediumTurquoise)
 
-	// Add regions to the list
 	for _, region := range regions {
 		selector.AddItem(region, "", 0, nil)
 	}
 
-	// Handle selection
 	selector.SetSelectedFunc(func(index int, name string, secondName string, shortcut rune) {
+		selector.HideRegionSelector()
+
 		if selector.onSelect != nil {
 			selector.onSelect(name)
 		}
 	})
-
-	// Handle ESC key
 	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEsc {
 			if selector.onCancel != nil {
@@ -93,7 +91,7 @@ func (rs *RegionSelector) ShowRegionSelector() (tview.Primitive, error) {
 	return rs, nil
 }
 
-func (rs *RegionSelector) hideRegionSelector() {
+func (rs *RegionSelector) HideRegionSelector() {
 	rs.manager.Pages().RemovePage("regionSelector")
 	if rs.manager.ActiveView() != nil {
 		rs.manager.App().SetFocus(rs.manager.ActiveView())

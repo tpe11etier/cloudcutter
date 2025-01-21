@@ -41,7 +41,6 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 		SetTitleAlign(tview.AlignCenter).
 		SetBorderColor(tcell.ColorMediumTurquoise)
 
-	// Add items without direct functions
 	selector.AddItem("Development", "", 0, nil)
 	selector.AddItem("Production", "", 0, nil)
 	selector.AddItem("Local", "", 0, nil)

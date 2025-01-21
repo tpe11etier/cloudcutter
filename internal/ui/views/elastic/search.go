@@ -343,7 +343,6 @@ func (v *View) refreshResults() {
 		}
 		v.state.mu.Unlock()
 
-		// Queue UI updates
 		v.manager.App().QueueUpdateDraw(func() {
 			//v.updateIndexStats()
 			v.displayCurrentPage()

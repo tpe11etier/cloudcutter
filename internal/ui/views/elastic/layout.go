@@ -254,7 +254,7 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "(A)vailable Fields (Enter to select)",
+										Title:       "Available Fields (Enter to select)",
 										TitleColor:  style.GruvboxMaterial.Yellow,
 										TextColor:   tcell.ColorBeige,
 									},
@@ -278,7 +278,7 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "(S)elected Fields (j↓/k↑ to order)",
+										Title:       "Selected Fields (j↓/k↑ to order)",
 										TitleColor:  style.GruvboxMaterial.Yellow,
 										TextColor:   tcell.ColorBeige,
 									},

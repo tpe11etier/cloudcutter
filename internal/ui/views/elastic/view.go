@@ -83,7 +83,6 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 
 	v.manager.Logger().Info("Initializing Elastic View", "defaultIndex", defaultIndex)
 
-	// Setup layout and initialize fields
 	v.setupLayout()
 	v.initTimeframeState()
 	err := v.initFieldsSync()
@@ -192,6 +191,9 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			return v.handleSelectedList(event)
 		case v.components.timeframeInput:
 			return v.handleTimeframeInput(event)
+		case v.components.numResultsInput:
+			return v.handleNumResultsInput(event)
+
 		case v.components.resultsTable:
 			return v.handleResultsTable(event)
 		case v.components.localFilterInput:
@@ -205,26 +207,36 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 func (v *View) Reinitialize(cfg aws.Config) error {
 	if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
-		return nil
+		return err
 	}
 
-	// If switching to local, clear timeframe
 	if cfg.Region == "local" {
 		v.components.timeframeInput.SetText("")
 		v.state.search.timeframe = ""
 	}
 
-	// Clear current fields and reload
 	v.state.mu.Lock()
 	v.state.data.fieldCache = NewFieldCache()
 	v.state.data.originalFields = nil
 	v.state.data.fieldOrder = nil
+	v.state.data.activeFields = make(map[string]bool)
 	v.state.mu.Unlock()
 
+	v.manager.App().QueueUpdateDraw(func() {
+		v.components.fieldList.Clear()
+		v.components.selectedList.Clear()
+		v.manager.SetFocus(v.components.filterInput)
+	})
+
+	// Load fields and rebuild UI
 	if err := v.loadFields(); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
-		return nil
+		return err
 	}
+
+	v.manager.App().QueueUpdateDraw(func() {
+		v.rebuildFieldList()
+	})
 
 	v.refreshResults()
 	return nil

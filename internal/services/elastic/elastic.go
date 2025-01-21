@@ -54,7 +54,7 @@ func NewService(cfg aws.Config) (*Service, error) {
 
 	l, err := logger.New(logCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+		return nil, fmt.Errorf("failed to initialize logger: %s", err)
 	}
 
 	var esConfig elasticsearch.Config
@@ -66,7 +66,7 @@ func NewService(cfg aws.Config) (*Service, error) {
 			Addresses: []string{"http://localhost:9200"},
 		}
 	} else {
-		l.Debug("Configuring AWS elasticsearch connection for region: %s", cfg.Region)
+		l.Debug("Configuring AWS elasticsearch connection for region: %s", "region", cfg.Region)
 		transport := &awsTransport{
 			client: &http.Client{},
 			cfg:    cfg,
@@ -134,7 +134,7 @@ func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
 
 	newClient, err := elasticsearch.NewClient(esConfig)
 	if err != nil {
-		return fmt.Errorf("error reinitializing Elasticsearch client: %v", err)
+		return fmt.Errorf("error reinitializing Elasticsearch client: %s", err)
 	}
 
 	s.Client = newClient
@@ -257,7 +257,7 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		pattern = "*"
 	}
 
-	s.log.Debug("Listing indices with pattern: %s", pattern)
+	s.log.Debug("Listing indices with pattern: %s", "pattern", pattern)
 	res, err := s.Client.Cat.Indices(
 		s.Client.Cat.Indices.WithContext(ctx),
 		s.Client.Cat.Indices.WithFormat("json"),
@@ -267,25 +267,44 @@ func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, er
 		s.Client.Cat.Indices.WithIndex(pattern),
 	)
 	if err != nil {
-		s.log.Error("Failed to list indices: %v", err)
-		return nil, fmt.Errorf("failed to list indices: %w", err)
+		s.log.Error("Failed to list indices", "error", err)
+		return nil, fmt.Errorf("failed to list indices: %v", err)
 	}
 	defer res.Body.Close()
 
 	var indices []struct {
 		Index string `json:"index"`
 	}
+
 	if err := json.NewDecoder(res.Body).Decode(&indices); err != nil {
-		s.log.Error("Failed to decode indices response: %v", err)
-		return nil, fmt.Errorf("decoding indices response failed: %w", err)
+		s.log.Error("Failed to decode indices response",
+			"error", err,
+			"will_continue", true)
+
+		if indices == nil {
+			indices = make([]struct {
+				Index string `json:"index"`
+			}, 0)
+		}
 	}
 
 	names := make([]string, 0, len(indices))
 	for _, idx := range indices {
-		names = append(names, idx.Index)
+		if idx.Index != "" {
+			names = append(names, idx.Index)
+		}
 	}
 
-	s.log.Debug("Found %d indices", len(names))
+	if len(names) == 0 {
+		s.log.Warn("No valid indices found",
+			"pattern", pattern,
+			"total_attempted", len(indices))
+	} else {
+		s.log.Debug("Found indices",
+			"count", len(names),
+			"total_attempted", len(indices))
+	}
+
 	return names, nil
 }
 
@@ -368,13 +387,13 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 		s.Client.Cat.Indices.WithV(true),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to preload index stats: %w", err)
+		return fmt.Errorf("failed to preload index stats:", "error", err)
 	}
 	defer res.Body.Close()
 
 	var stats []IndexStats
 	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
-		return fmt.Errorf("failed to decode index stats: %w", err)
+		return fmt.Errorf("failed to decode index stats:", "error", err)
 	}
 
 	newCache := make(map[string]*IndexStats)
@@ -502,5 +521,5 @@ func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*Inde
 		}
 	}
 
-	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
+	return nil, fmt.Errorf("no stats found for index:", "pattern", indexPattern)
 }
