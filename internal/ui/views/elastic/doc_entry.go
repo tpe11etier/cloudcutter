@@ -3,6 +3,7 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ func (de *DocEntry) GetMetadataFields() []string {
 func (de *DocEntry) GetAvailableFields() []string {
 	fields := de.GetMetadataFields()
 	de.getFieldsRecursive(de.data, "", &fields)
+	sort.Strings(fields)
 	return fields
 }
 

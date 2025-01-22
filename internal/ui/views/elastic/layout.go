@@ -146,7 +146,7 @@ func (v *View) setupLayout() {
 										if s != v.state.search.currentIndex {
 											v.state.search.currentIndex = s
 											v.resetFieldState()
-											v.doRefreshWithCurrentTimeframe()
+											v.refreshWithCurrentTimeframe()
 										}
 									},
 								},

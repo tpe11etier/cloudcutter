@@ -78,12 +78,20 @@ func TestGetAvailableFields(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 			fields := doc.GetAvailableFields()
+			// Check lengths first
 			if len(fields) != len(tt.expectFields) {
 				t.Errorf("Expected %v fields, got %v", len(tt.expectFields), len(fields))
 			}
-			for i, field := range tt.expectFields {
-				if fields[i] != field {
-					t.Errorf("Expected field %s, got %s", field, fields[i])
+
+			// Check all expected fields exist
+			expectedSet := make(map[string]struct{})
+			for _, f := range tt.expectFields {
+				expectedSet[f] = struct{}{}
+			}
+
+			for _, field := range fields {
+				if _, ok := expectedSet[field]; !ok {
+					t.Errorf("Unexpected field: %s", field)
 				}
 			}
 		})

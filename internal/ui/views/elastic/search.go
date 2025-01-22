@@ -382,7 +382,7 @@ func (v *View) buildQuery() map[string]any {
 	numResults := v.state.search.numResults
 	v.state.mu.RUnlock()
 
-	query, err := BuildQuery(filters, numResults, timeframe)
+	query, err := BuildQuery(filters, numResults, timeframe, v.state.data.fieldCache)
 	if err != nil {
 		v.manager.Logger().Error("Error building query", "error", err)
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))
