@@ -3,6 +3,11 @@ package profile
 import (
 	"context"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"gopkg.in/ini.v1"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
@@ -19,6 +24,7 @@ type Selector struct {
 	onCancel  func()
 	ph        *Handler
 	statusBar *statusbar.StatusBar
+	profiles  []string
 	manager   Manager
 }
 
@@ -41,20 +47,17 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 		SetTitleAlign(tview.AlignCenter).
 		SetBorderColor(tcell.ColorMediumTurquoise)
 
-	selector.AddItem("Development", "", 0, nil)
-	selector.AddItem("Production", "", 0, nil)
-	selector.AddItem("Local", "", 0, nil)
+	// Discover available profiles
+	selector.profiles = selector.discoverProfiles()
 
-	// Set selection handler
+	// Add all discovered profiles
+	for _, profile := range selector.profiles {
+		selector.AddItem(profile, "", 0, nil)
+	}
+
+	// Set selection handler to use profile name directly
 	selector.SetSelectedFunc(func(index int, name string, secondName string, shortcut rune) {
-		switch index {
-		case 0:
-			selector.switchProfile("opal_dev")
-		case 1:
-			selector.switchProfile("opal_prod")
-		case 2:
-			selector.switchProfile("local")
-		}
+		selector.switchProfile(name)
 	})
 
 	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -97,4 +100,55 @@ func (ps *Selector) ShowSelector() (tview.Primitive, error) {
 
 	ps.manager.Pages().AddPage("profileSelector", modal, true, true)
 	return ps, nil
+}
+
+func (ps *Selector) discoverProfiles() []string {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	profileMap := make(map[string]struct{})
+
+	// Load profiles from credentials file
+	credFile := filepath.Join(homedir, ".aws", "credentials")
+	if readCfg, err := ini.Load(credFile); err == nil {
+		for _, section := range readCfg.Sections() {
+			name := section.Name()
+			if name != ini.DefaultSection {
+				name = strings.TrimPrefix(name, "profile")
+				profileMap[name] = struct{}{}
+			}
+		}
+	}
+
+	// Load profiles from config file
+	configFile := filepath.Join(homedir, ".aws", "config")
+	if cfgFile, err := ini.Load(configFile); err == nil {
+		for _, section := range cfgFile.Sections() {
+			name := section.Name()
+			// Config file uses "profile prefix" except for default
+			if name != ini.DefaultSection {
+				name = strings.TrimPrefix(name, "profile ")
+				profileMap[name] = struct{}{}
+			}
+		}
+	}
+
+	// Add default profile if either file exists
+	if _, err := os.Stat(credFile); err == nil {
+		profileMap["default"] = struct{}{}
+	}
+	if _, err := os.Stat(configFile); err == nil {
+		profileMap["default"] = struct{}{}
+	}
+
+	// Convert map to sorted slice
+	profiles := make([]string, 0, len(profileMap))
+	for profile := range profileMap {
+		profiles = append(profiles, profile)
+	}
+	sort.Strings(profiles)
+
+	return profiles
 }
