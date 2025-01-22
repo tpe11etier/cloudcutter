@@ -85,7 +85,8 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		logger:         log,
 	}
 
-	vm.profileHandler = profile.NewProfileHandler(
+	var err error
+	vm.profileHandler, err = profile.NewProfileHandler(
 		vm.StatusChan,
 		func(message string) {
 			vm.pages.RemovePage("profileSelector")
@@ -93,6 +94,9 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		},
 		func() { vm.hideLoading() },
 	)
+	if err != nil {
+		vm.logger.Error("Failed to initialize profile handler", "error", err)
+	}
 
 	vm.initialize()
 	return vm

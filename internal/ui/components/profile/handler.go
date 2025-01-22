@@ -18,7 +18,7 @@ type Handler struct {
 	onLoadEnd   func()
 }
 
-func NewProfileHandler(statusChan chan<- string, onLoadStart func(string), onLoadEnd func()) *Handler {
+func NewProfileHandler(statusChan chan<- string, onLoadStart func(string), onLoadEnd func()) (*Handler, error) {
 	ph := &Handler{
 		statusChan:  statusChan,
 		region:      "us-west-2",
@@ -26,9 +26,13 @@ func NewProfileHandler(statusChan chan<- string, onLoadStart func(string), onLoa
 		onLoadEnd:   onLoadEnd,
 	}
 
-	oc := auth.LoadOpalConfig()
-	ph.auth = auth.New(ph.sendStatus, oc)
-	return ph
+	authenticator, err := auth.New(ph.sendStatus)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	ph.auth = authenticator
+	return ph, nil
 }
 
 func (ph *Handler) sendStatus(status string) {
@@ -40,11 +44,9 @@ func (ph *Handler) sendStatus(status string) {
 
 func (ph *Handler) SwitchProfile(ctx context.Context, profile string, callback func(aws.Config, error)) {
 	if ph.onLoadStart != nil {
-		// Show loading first, then start authentication
 		ph.onLoadStart(fmt.Sprintf("Authenticating profile: %s", profile))
 	}
 
-	// Start async profile switch after loading is shown
 	go func() {
 		defer func() {
 			if ph.onLoadEnd != nil {
@@ -75,14 +77,12 @@ func (ph *Handler) IsAuthenticating() bool {
 	return ph.auth.IsAuthenticating()
 }
 
-// SetRegion updates the region setting
 func (ph *Handler) SetRegion(region string) {
 	ph.mu.Lock()
 	defer ph.mu.Unlock()
 	ph.region = region
 }
 
-// GetRegion returns the current region setting
 func (ph *Handler) GetRegion() string {
 	ph.mu.RLock()
 	defer ph.mu.RUnlock()

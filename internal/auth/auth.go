@@ -24,19 +24,41 @@ type Authenticator struct {
 	isAuthenticating bool
 	onStatus         func(string)
 	opalConfig       OpalConfig
+	opalProfiles     map[string]string // maps profile names to role IDs
 }
 
-func New(statusFn func(string), opalConfig OpalConfig) *Authenticator {
-	return &Authenticator{
-		onStatus:   statusFn,
-		opalConfig: opalConfig,
+func New(statusFn func(string)) (*Authenticator, error) {
+	opalConfig := LoadOpalConfig()
+
+	opalProfiles := make(map[string]string)
+	for _, env := range opalConfig.Environments {
+		for _, profileTag := range env.ProfileTags {
+			opalProfiles[profileTag] = env.RoleID
+		}
 	}
-}
 
+	return &Authenticator{
+		onStatus:     statusFn,
+		opalConfig:   opalConfig,
+		opalProfiles: opalProfiles,
+	}, nil
+}
 func (a *Authenticator) IsAuthenticating() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.isAuthenticating
+}
+
+func (a *Authenticator) Current() *Session {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.currentSession
+}
+
+func (a *Authenticator) sendStatus(status string) {
+	if a.onStatus != nil {
+		a.onStatus(status)
+	}
 }
 
 func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region string) (*Session, error) {
@@ -64,16 +86,14 @@ func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region strin
 	var cfg aws.Config
 	var err error
 
-	switch profile {
-	case "opal_prod":
-		cfg, err = a.authenticateOpal(ctx, profile, region, a.opalConfig.ProdRoleID)
-	case "opal_dev":
-		cfg, err = a.authenticateOpal(ctx, profile, region, a.opalConfig.DevRoleID)
-	case "local":
+	if roleID, isOpal := a.opalProfiles[profile]; isOpal {
+		cfg, err = a.authenticateOpal(ctx, profile, region, roleID)
+	} else if profile == "local" {
 		cfg, err = a.authenticateLocal(ctx, region)
-	default:
+	} else {
 		cfg, err = a.authenticateStandard(ctx, profile, region)
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
@@ -133,21 +153,11 @@ func (a *Authenticator) runOpalCommand(ctx context.Context, roleID, profileName 
 	return nil
 }
 
-func (a *Authenticator) Current() *Session {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.currentSession
-}
-
-func (a *Authenticator) sendStatus(status string) {
-	if a.onStatus != nil {
-		a.onStatus(status)
-	}
-}
-
 func (a *Authenticator) authenticateLocal(ctx context.Context, region string) (aws.Config, error) {
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion("local"),
 	}
 	return config.LoadDefaultConfig(ctx, opts...)
 }
+
+// profile/handler.go

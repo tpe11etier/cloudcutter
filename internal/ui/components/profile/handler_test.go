@@ -16,11 +16,13 @@ func TestNewProfileHandler(t *testing.T) {
 	var loadStartCalled bool
 	var loadEndCalled bool
 
-	ph := NewProfileHandler(
+	ph, err := NewProfileHandler(
 		statusChan,
 		func(msg string) { loadStartCalled = true },
 		func() { loadEndCalled = true },
 	)
+
+	assert.Nil(t, err)
 
 	assert.NotNil(t, ph)
 	assert.Equal(t, "us-west-2", ph.GetRegion())
@@ -40,7 +42,8 @@ func TestSwitchProfile_Success(t *testing.T) {
 	var loadEndCalled bool
 	var loadStartMsg string
 
-	authenticator := auth.New(func(status string) {}, auth.OpalConfig{})
+	authenticator, err := auth.New(func(status string) {})
+	assert.Nil(t, err)
 
 	ph := &Handler{
 		auth:       authenticator,
@@ -88,7 +91,8 @@ func TestSwitchProfile_Error(t *testing.T) {
 	var mu sync.Mutex
 	var loadEndCalled bool
 
-	authenticator := auth.New(func(status string) {}, auth.OpalConfig{})
+	authenticator, err := auth.New(func(status string) {})
+	assert.Nil(t, err)
 
 	ph := &Handler{
 		auth:        authenticator,
@@ -123,7 +127,8 @@ func TestSwitchProfile_Error(t *testing.T) {
 }
 
 func TestGetCurrentProfile(t *testing.T) {
-	authenticator := auth.New(func(status string) {}, auth.OpalConfig{})
+	authenticator, err := auth.New(func(status string) {})
+	assert.Nil(t, err)
 	ph := &Handler{
 		auth:   authenticator,
 		region: "us-west-2",
