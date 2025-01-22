@@ -10,7 +10,7 @@ import (
 
 func TestBuildQuery(t *testing.T) {
 	fixedTime := time.Date(2024, 10, 4, 1, 0, 17, 0, time.UTC)
-
+	fieldCache := newTestFieldCache()
 	tests := []struct {
 		name        string
 		filters     []string
@@ -133,7 +133,7 @@ func TestBuildQuery(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildQueryWithTime(tt.filters, tt.size, tt.timeframe, fixedTime)
+			got, err := BuildQueryWithTime(tt.filters, tt.size, tt.timeframe, fixedTime, fieldCache)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("BuildQuery() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -152,7 +152,9 @@ func TestBuildQuery(t *testing.T) {
 		})
 	}
 }
+
 func TestParseFilter(t *testing.T) {
+	fieldCache := newTestFieldCache()
 	tests := []struct {
 		name        string
 		filter      string
@@ -407,7 +409,7 @@ func TestParseFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseFilter(tt.filter)
+			got, err := ParseFilter(tt.filter, fieldCache)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseFilter() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -428,7 +430,6 @@ func TestParseFilter(t *testing.T) {
 }
 
 func TestHelperFunctions(t *testing.T) {
-	// Test isValidFieldName
 	validFieldNames := []string{
 		"name",
 		"user.name",
@@ -675,27 +676,27 @@ func TestBuildTimeQuery(t *testing.T) {
 		name      string
 		timeframe string
 		now       time.Time
-		want      map[string]interface{}
+		want      map[string]any
 		wantErr   bool
 	}{
 		{
 			name:      "12 hour timeframe",
 			timeframe: "12h",
 			now:       fixedTime,
-			want: map[string]interface{}{
-				"bool": map[string]interface{}{
-					"should": []map[string]interface{}{
+			want: map[string]any{
+				"bool": map[string]any{
+					"should": []map[string]any{
 						{
-							"range": map[string]interface{}{
-								"unixTime": map[string]interface{}{
+							"range": map[string]any{
+								"unixTime": map[string]any{
 									"gte": int64(1728003617 - (12 * 3600)),
 									"lte": int64(1728003617),
 								},
 							},
 						},
 						{
-							"range": map[string]interface{}{
-								"detectionGeneratedTime": map[string]interface{}{
+							"range": map[string]any{
+								"detectionGeneratedTime": map[string]any{
 									"gte": int64(1728003617000 - (12 * 3600 * 1000)),
 									"lte": int64(1728003617000),
 								},
@@ -711,20 +712,20 @@ func TestBuildTimeQuery(t *testing.T) {
 			name:      "week keyword",
 			timeframe: "week",
 			now:       fixedTime,
-			want: map[string]interface{}{
-				"bool": map[string]interface{}{
-					"should": []map[string]interface{}{
+			want: map[string]any{
+				"bool": map[string]any{
+					"should": []map[string]any{
 						{
-							"range": map[string]interface{}{
-								"unixTime": map[string]interface{}{
+							"range": map[string]any{
+								"unixTime": map[string]any{
 									"gte": int64(1728003617 - (7 * 24 * 3600)),
 									"lte": int64(1728003617),
 								},
 							},
 						},
 						{
-							"range": map[string]interface{}{
-								"detectionGeneratedTime": map[string]interface{}{
+							"range": map[string]any{
+								"detectionGeneratedTime": map[string]any{
 									"gte": int64(1728003617000 - (7 * 24 * 3600 * 1000)),
 									"lte": int64(1728003617000),
 								},
@@ -753,20 +754,20 @@ func TestBuildTimeQuery(t *testing.T) {
 		//	name:      "today keyword",
 		//	timeframe: "today",
 		//	now:       fixedTime,
-		//	want: map[string]interface{}{
-		//		"bool": map[string]interface{}{
-		//			"should": []map[string]interface{}{
+		//	want: map[string]any{
+		//		"bool": map[string]any{
+		//			"should": []map[string]any{
 		//				{
-		//					"range": map[string]interface{}{
-		//						"unixTime": map[string]interface{}{
+		//					"range": map[string]any{
+		//						"unixTime": map[string]any{
 		//							"gte": int64(1728003617 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Seconds())),
 		//							"lte": int64(1728003617),
 		//						},
 		//					},
 		//				},
 		//				{
-		//					"range": map[string]interface{}{
-		//						"detectionGeneratedTime": map[string]interface{}{
+		//					"range": map[string]any{
+		//						"detectionGeneratedTime": map[string]any{
 		//							"gte": int64(1728003617000 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Milliseconds())),
 		//							"lte": int64(1728003617000),
 		//						},
@@ -797,7 +798,7 @@ func TestBuildTimeQuery(t *testing.T) {
 }
 
 // Helper function to compare nested maps
-func compareMaps(a, b map[string]interface{}) bool {
+func compareMaps(a, b map[string]any) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -809,13 +810,13 @@ func compareMaps(a, b map[string]interface{}) bool {
 		}
 
 		switch val1 := v1.(type) {
-		case map[string]interface{}:
-			val2, ok := v2.(map[string]interface{})
+		case map[string]any:
+			val2, ok := v2.(map[string]any)
 			if !ok || !compareMaps(val1, val2) {
 				return false
 			}
-		case []interface{}:
-			val2, ok := v2.([]interface{})
+		case []any:
+			val2, ok := v2.([]any)
 			if !ok || !compareSlices(val1, val2) {
 				return false
 			}
@@ -833,20 +834,19 @@ func compareMaps(a, b map[string]interface{}) bool {
 	return true
 }
 
-// Helper function to compare slices
-func compareSlices(a, b []interface{}) bool {
+func compareSlices(a, b []any) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		switch val1 := a[i].(type) {
-		case map[string]interface{}:
-			val2, ok := b[i].(map[string]interface{})
+		case map[string]any:
+			val2, ok := b[i].(map[string]any)
 			if !ok || !compareMaps(val1, val2) {
 				return false
 			}
-		case []interface{}:
-			val2, ok := b[i].([]interface{})
+		case []any:
+			val2, ok := b[i].([]any)
 			if !ok || !compareSlices(val2, val2) {
 				return false
 			}
@@ -857,4 +857,24 @@ func compareSlices(a, b []interface{}) bool {
 		}
 	}
 	return true
+}
+
+func newTestFieldCache() *FieldCache {
+	fc := NewFieldCache()
+	fc.Set("status", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("age", &FieldMetadata{Type: "long", Searchable: true, Aggregatable: true})
+	fc.Set("price", &FieldMetadata{Type: "float", Searchable: true, Aggregatable: true})
+	fc.Set("temperature", &FieldMetadata{Type: "float", Searchable: true, Aggregatable: true})
+	fc.Set("stock", &FieldMetadata{Type: "long", Searchable: true, Aggregatable: true})
+	fc.Set("deleted", &FieldMetadata{Type: "boolean", Searchable: true, Aggregatable: true})
+	fc.Set("active", &FieldMetadata{Type: "boolean", Searchable: true, Aggregatable: true})
+	fc.Set("name", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("description", &FieldMetadata{Type: "text", Searchable: true, Aggregatable: false})
+	fc.Set("user.name", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("user.profile.email", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("data.user.preferences.theme", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("custom_field_123", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	fc.Set("_id", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: false})
+	fc.Set("detection_id_dedup", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
+	return fc
 }

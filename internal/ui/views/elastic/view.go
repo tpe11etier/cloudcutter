@@ -12,12 +12,11 @@ import (
 )
 
 type View struct {
-	manager                     *manager.Manager
-	components                  viewComponents
-	service                     *elastic.Service
-	state                       State
-	layout                      tview.Primitive
-	refreshWithCurrentTimeframe func()
+	manager    *manager.Manager
+	components viewComponents
+	service    *elastic.Service
+	state      State
+	layout     tview.Primitive
 }
 
 type viewComponents struct {
@@ -91,7 +90,9 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 		return v, err
 	}
 
-	v.refreshWithCurrentTimeframe = v.doRefreshWithCurrentTimeframe
+	v.components.timeframeInput.SetText("today")
+	v.refreshWithCurrentTimeframe()
+
 	manager.SetFocus(v.components.filterInput)
 	v.manager.Logger().Info("Elastic View successfully initialized")
 	return v, nil
@@ -255,20 +256,17 @@ func (v *View) Close() error {
 }
 
 func (v *View) initTimeframeState() {
-	v.state.search.timeframe = ""
+	defaultTimeframe := "today"
 
-	v.components.timeframeInput.SetText("today")
+	v.state.search.timeframe = defaultTimeframe
+	v.components.timeframeInput.SetText(defaultTimeframe)
 
-	v.doRefreshWithCurrentTimeframe()
+	v.refreshWithCurrentTimeframe()
 }
 
-func (v *View) doRefreshWithCurrentTimeframe() {
+func (v *View) refreshWithCurrentTimeframe() {
 	timeframe := strings.TrimSpace(v.components.timeframeInput.GetText())
-	// If timeframe is "today" (the default) and hasn't been explicitly set, treat as empty
-	if timeframe == "today" && v.state.search.timeframe == "" {
-		v.state.search.timeframe = ""
-	} else {
-		v.state.search.timeframe = timeframe
-	}
+	v.state.search.timeframe = timeframe
+
 	v.refreshResults()
 }

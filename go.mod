@@ -7,7 +7,6 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.32.6
 	github.com/aws/aws-sdk-go-v2/config v1.28.5
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.37.2
-	github.com/aws/aws-sdk-go-v2/service/ec2 v1.194.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.1
 	github.com/aws/smithy-go v1.22.1
 	github.com/elastic/go-elasticsearch/v6 v6.8.10

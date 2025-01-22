@@ -10,11 +10,15 @@ import (
 	"sync"
 )
 
+type FieldCaps struct {
+	Fields map[string]map[string]FieldMetadata `json:"fields"`
+}
+
 type FieldMetadata struct {
-	Type         string
-	Searchable   bool
-	Aggregatable bool
-	Active       bool
+	Type         string `json:"type"`
+	Searchable   bool   `json:"searchable"`
+	Aggregatable bool   `json:"aggregatable"`
+	Active       bool   `json:"active"`
 }
 
 type FieldCache struct {
@@ -73,17 +77,18 @@ func (v *View) loadFields() error {
 		return err
 	}
 
-	activeFields := make(map[string]struct{})
+	// Gather all discovered fields from the hits
+	discoveredFields := make(map[string]struct{})
 	for _, entry := range entries {
 		fields := entry.GetAvailableFields()
 		for _, field := range fields {
-			activeFields[field] = struct{}{}
+			discoveredFields[field] = struct{}{}
 		}
 	}
 
-	// Only fetch field metadata if it isn't cached
+	// Check if we need metadata for these discovered fields
 	needMetadata := false
-	for field := range activeFields {
+	for field := range discoveredFields {
 		if _, ok := v.state.data.fieldCache.Get(field); !ok {
 			needMetadata = true
 			break
@@ -91,7 +96,6 @@ func (v *View) loadFields() error {
 	}
 
 	if needMetadata {
-		// Fetch metadata for all fields
 		res, err := v.service.Client.FieldCaps(
 			v.service.Client.FieldCaps.WithIndex(v.state.search.currentIndex),
 			v.service.Client.FieldCaps.WithBody(strings.NewReader(`{"fields": "*"}`)),
@@ -101,25 +105,38 @@ func (v *View) loadFields() error {
 		}
 		defer res.Body.Close()
 
-		var fieldCaps struct {
-			Fields map[string]map[string]struct {
-				Type         string `json:"type"`
-				Searchable   bool   `json:"searchable"`
-				Aggregatable bool   `json:"aggregatable"`
-			} `json:"fields"`
-		}
+		var fieldCaps FieldCaps
 
 		if err := json.NewDecoder(res.Body).Decode(&fieldCaps); err != nil {
 			return fmt.Errorf("error decoding field caps: %v", err)
 		}
 
-		for field, types := range fieldCaps.Fields {
+		defaultFields := map[string]FieldMetadata{
+			"_id": {
+				Type:         "keyword",
+				Searchable:   true,
+				Aggregatable: true,
+				Active:       false,
+			},
+			"_index": {
+				Type:         "keyword",
+				Searchable:   true,
+				Aggregatable: true,
+				Active:       false,
+			},
+		}
+		for f, meta := range defaultFields {
+			v.state.data.fieldCache.Set(f, &meta)
+		}
+
+		// Populate our cache from the FieldCaps response
+		for f, types := range fieldCaps.Fields {
 			for typeName, meta := range types {
-				v.state.data.fieldCache.Set(field, &FieldMetadata{
+				v.state.data.fieldCache.Set(f, &FieldMetadata{
 					Type:         typeName,
 					Searchable:   meta.Searchable,
 					Aggregatable: meta.Aggregatable,
-					Active:       false,
+					Active:       false, // active in ES
 				})
 				break
 			}
@@ -129,37 +146,51 @@ func (v *View) loadFields() error {
 	v.state.mu.Lock()
 	defer v.state.mu.Unlock()
 
-	fields := make([]string, 0, len(activeFields))
-	for field := range activeFields {
-		fields = append(fields, field)
+	allFields := make([]string, 0, len(discoveredFields))
+	for field := range discoveredFields {
+		allFields = append(allFields, field)
 	}
-	sort.Strings(fields)
+	sort.Strings(allFields)
 
-	v.state.data.originalFields = fields
-	v.state.data.fieldOrder = make([]string, len(fields))
-	copy(v.state.data.fieldOrder, fields)
+	v.state.data.originalFields = allFields
+	v.state.data.fieldOrder = make([]string, len(allFields))
+	copy(v.state.data.fieldOrder, allFields)
 
-	v.manager.Logger().Debug("Fields loaded", "originalFields", v.state.data.originalFields, "fieldOrder", v.state.data.fieldOrder)
+	v.state.data.activeFields = make(map[string]bool)
+	if len(allFields) > 0 {
+		firstField := allFields[0]
+		v.state.data.activeFields[firstField] = true
+	}
 
-	for field := range activeFields {
+	v.manager.Logger().Debug("Fields loaded",
+		"originalFields", v.state.data.originalFields,
+		"fieldOrder", v.state.data.fieldOrder,
+	)
+
+	// Mark these fields as "found in ES" (meta.Active = true if you want)
+	for field := range discoveredFields {
 		if meta, ok := v.state.data.fieldCache.Get(field); ok {
 			meta.Active = true
-			v.manager.Logger().Debug("Set field active", "field", field)
-		} else {
-			v.manager.Logger().Warn("Field metadata missing", "field", field)
+			v.manager.Logger().Debug("Set field meta.Active=true", "field", field)
 		}
 	}
 
-	// Preserve existing active field selections that are still valid
-	newActiveFields := make(map[string]bool)
-	for field := range v.state.data.activeFields {
-		if _, ok := activeFields[field]; ok {
-			newActiveFields[field] = true
+	// preserve old selections and ensure `_id` is selected
+	oldActive := v.state.data.activeFields
+	newActive := make(map[string]bool)
+
+	// preserve any old active fields, but only if they're still discovered
+	for field := range oldActive {
+		if _, ok := discoveredFields[field]; ok {
+			newActive[field] = true
 		}
 	}
-	v.state.data.activeFields = newActiveFields
 
-	v.manager.Logger().Debug("Active fields updated", "activeFields", v.state.data.activeFields)
+	v.state.data.activeFields = newActive
+
+	v.manager.Logger().Debug("active fields updated",
+		"activeFields", v.state.data.activeFields,
+	)
 
 	return nil
 }
@@ -235,14 +266,20 @@ func (v *View) toggleFieldList() {
 
 func (v *View) rebuildFieldList() {
 	v.components.fieldList.Clear()
-	v.manager.Logger().Debug("Rebuilding field list", "fieldOrder", v.state.data.fieldOrder, "activeFields", v.state.data.activeFields)
+	v.components.selectedList.Clear()
 
+	// Rebuild both lists.
 	for _, field := range v.state.data.fieldOrder {
-		if !v.state.data.activeFields[field] { // Only show non-selected fields
+		if v.state.data.activeFields[field] {
+			// Field is active => goes to the selected list
+			v.components.selectedList.AddItem(field, "", 0, func() {
+				v.toggleField(field)
+			})
+		} else {
+			// Field is inactive => goes to the unselected list
 			v.components.fieldList.AddItem(field, "", 0, func() {
 				v.toggleField(field)
 			})
-			v.manager.Logger().Debug("Added field to fieldList", "field", field)
 		}
 	}
 
@@ -292,18 +329,32 @@ func (v *View) filterFieldList(filter string) {
 	}
 
 	filter = strings.ToLower(filter)
-	var matches []string
+	var matchedFields []string // Changed name to avoid conflict
+
+	// Add debug logging
+	v.manager.Logger().Debug("Filtering fields",
+		"filter", filter,
+		"originalFields", v.state.data.originalFields,
+		"activeFields", v.state.data.activeFields)
 
 	// Only show fields that match the filter AND are not currently active
 	for _, field := range v.state.data.originalFields {
-		if strings.Contains(strings.ToLower(field), filter) && !v.state.data.activeFields[field] {
-			matches = append(matches, field)
+		isActive := v.state.data.activeFields[field]
+		containsFilter := strings.Contains(strings.ToLower(field), filter)
+
+		v.manager.Logger().Debug("Field filter check",
+			"field", field,
+			"isActive", isActive,
+			"containsFilter", containsFilter)
+
+		if containsFilter && !isActive {
+			matchedFields = append(matchedFields, field)
 		}
 	}
 
-	v.state.data.fieldMatches = matches
+	v.state.data.fieldMatches = matchedFields
 
-	for _, field := range matches {
+	for _, field := range matchedFields {
 		displayText := field
 		fieldName := field
 		v.components.fieldList.AddItem(displayText, "", 0, func() {
@@ -311,7 +362,7 @@ func (v *View) filterFieldList(filter string) {
 		})
 	}
 
-	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)", filter, len(matches)))
+	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)", filter, len(matchedFields)))
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {

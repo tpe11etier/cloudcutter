@@ -51,7 +51,7 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 		}
 
 		v.state.mu.Lock()
-		if _, err := ParseFilter(text); err != nil {
+		if _, err := ParseFilter(text, v.state.data.fieldCache); err != nil {
 			v.state.mu.Unlock()
 			v.manager.UpdateStatusBar(fmt.Sprintf("Invalid filter: %v", err))
 			return nil
@@ -61,9 +61,7 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 		v.addFilter(text)
 		v.state.mu.Unlock()
 
-		if v.refreshWithCurrentTimeframe != nil {
-			v.refreshWithCurrentTimeframe()
-		}
+		v.refreshWithCurrentTimeframe()
 		return nil
 	}
 	return event
@@ -131,10 +129,10 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 					v.manager.UpdateStatusBar("Fields loaded successfully")
 				})
 
-				v.doRefreshWithCurrentTimeframe()
+				v.refreshWithCurrentTimeframe()
 			}()
 		} else {
-			v.doRefreshWithCurrentTimeframe()
+			v.refreshWithCurrentTimeframe()
 		}
 		return nil
 	}
@@ -216,7 +214,7 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyEnter:
 		// Field list only handles activation
 		index := v.components.fieldList.GetCurrentItem()
-		if index >= 0 {
+		if index >= 0 && index < v.components.fieldList.GetItemCount() {
 			mainText, _ := v.components.fieldList.GetItemText(index)
 			v.toggleField(mainText)
 		}
@@ -239,14 +237,14 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Rune() {
 		case 'k': // Move up
 			index := v.components.selectedList.GetCurrentItem()
-			if index >= 0 {
+			if index >= 0 && index < v.components.selectedList.GetItemCount() {
 				mainText, _ := v.components.selectedList.GetItemText(index)
 				v.moveFieldPosition(mainText, true)
 			}
 			return nil
 		case 'j': // Move down
 			index := v.components.selectedList.GetCurrentItem()
-			if index >= 0 {
+			if index >= 0 && index < v.components.selectedList.GetItemCount() {
 				mainText, _ := v.components.selectedList.GetItemText(index)
 				v.moveFieldPosition(mainText, false)
 			}
@@ -256,7 +254,7 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 		}
 	case tcell.KeyEnter:
 		index := v.components.selectedList.GetCurrentItem()
-		if index >= 0 {
+		if index >= 0 && index < v.components.selectedList.GetItemCount() {
 			mainText, _ := v.components.selectedList.GetItemText(index)
 			v.toggleField(mainText)
 		}
@@ -286,6 +284,10 @@ func (v *View) handleTimeframeInput(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyEsc:
 		v.manager.SetFocus(v.components.filterInput)
+		return nil
+	case tcell.KeyEnter:
+		v.state.search.timeframe = v.components.timeframeInput.GetText()
+		v.refreshWithCurrentTimeframe()
 		return nil
 	}
 	return event

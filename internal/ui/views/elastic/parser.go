@@ -9,13 +9,11 @@ import (
 )
 
 var (
-	// Compile regexes once for better performance
 	validFieldNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*(?:\.[a-zA-Z][a-zA-Z0-9_-]*)*$`)
 
 	validOperatorRegex = regexp.MustCompile(`^(>=|<=|>|<|=)$`)
 )
 
-// Error types for better error handling
 type ParseError struct {
 	Field   string
 	Message string
@@ -26,13 +24,12 @@ func (e *ParseError) Error() string {
 }
 
 // BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
-// BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
-func BuildQuery(filters []string, size int, timeframe string) (map[string]any, error) {
-	return BuildQueryWithTime(filters, size, timeframe, time.Now())
+func BuildQuery(filters []string, size int, timeframe string, fieldCache *FieldCache) (map[string]any, error) {
+	return BuildQueryWithTime(filters, size, timeframe, time.Now(), fieldCache)
 }
 
 // BuildQueryWithTime is like BuildQuery but accepts a specific time for testing
-func BuildQueryWithTime(filters []string, size int, timeframe string, now time.Time) (map[string]any, error) {
+func BuildQueryWithTime(filters []string, size int, timeframe string, now time.Time, fieldCache *FieldCache) (map[string]any, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("size must be non-negative, got %d", size)
 	}
@@ -54,7 +51,7 @@ func BuildQueryWithTime(filters []string, size int, timeframe string, now time.T
 	// Process user filters
 	var parseErrors []string
 	for i, f := range filters {
-		clause, err := ParseFilter(f)
+		clause, err := ParseFilter(f, fieldCache)
 		if err != nil {
 			parseErrors = append(parseErrors, fmt.Sprintf("filter[%d]: %v", i, err))
 			continue
@@ -88,8 +85,7 @@ func BuildQueryWithTime(filters []string, size int, timeframe string, now time.T
 	}, nil
 }
 
-// ParseFilter parses a single filter with comprehensive error handling
-func ParseFilter(filter string) (map[string]any, error) {
+func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) {
 	filter = strings.TrimSpace(filter)
 	if filter == "" {
 		return nil, &ParseError{Field: "", Message: "empty filter"}
@@ -115,184 +111,88 @@ func ParseFilter(filter string) (map[string]any, error) {
 		}, nil
 	}
 
-	// 1) Handle range queries (>, >=, <, <=)
-	if clause, err := parseRangeSyntax(filter); err != nil {
+	// Handle range queries first
+	if clause, err := parseRangeSyntax(filter, fieldCache); err != nil {
 		return nil, err
 	} else if clause != nil {
 		return clause, nil
 	}
 
-	// 2) Handle "field=value"
+	// Split into field and value
 	parts := strings.SplitN(filter, "=", 2)
 	if len(parts) != 2 {
-		return nil, &ParseError{Field: filter, Message: "invalid filter format, expected 'field=value' or range query"}
+		return nil, &ParseError{Field: filter, Message: "invalid filter format"}
 	}
 
 	fieldName := strings.TrimSpace(parts[0])
 	value := strings.TrimSpace(parts[1])
 
-	// Validate field name
 	if !isValidFieldName(fieldName) {
 		return nil, &ParseError{Field: fieldName, Message: "invalid field name"}
 	}
 
-	// Handle null values
-	if isNullValue(value) {
-		return buildNullQuery(fieldName), nil
-	}
-
-	// Try numeric
-	if clause, err := parseNumericTerm(fieldName, value); err != nil {
-		return nil, err
-	} else if clause != nil {
-		return clause, nil
-	}
-
-	// Try boolean
-	if clause, err := parseBooleanTerm(fieldName, value); err != nil {
-		return nil, err
-	} else if clause != nil {
-		return clause, nil
-	}
-
-	// Try wildcard
-	if clause, err := parseWildcardTerm(fieldName, value); err != nil {
-		return nil, err
-	} else if clause != nil {
-		return clause, nil
-	}
-
-	// Otherwise, use match query
-	matchQuery := make(map[string]any)
-	innerMatch := make(map[string]any)
-	innerMatch[fieldName] = unescapeValue(value)
-	matchQuery["match"] = innerMatch
-	return matchQuery, nil
-}
-
-func parseRangeSyntax(filter string) (map[string]any, error) {
-	// Find the operator
-	var opStart int = -1
-	for i, c := range filter {
-		if c == '>' || c == '<' {
-			opStart = i
-			break
+	metadata, exists := fieldCache.Get(fieldName)
+	if !exists {
+		metadata = &FieldMetadata{
+			Type:         "keyword",
+			Searchable:   true,
+			Aggregatable: true,
 		}
 	}
-	if opStart == -1 {
-		return nil, nil
+
+	if !metadata.Searchable {
+		return nil, &ParseError{Field: fieldName, Message: "field is not searchable"}
 	}
 
-	fieldName := strings.TrimSpace(filter[:opStart])
-	if !isValidFieldName(fieldName) {
-		return nil, &ParseError{Field: fieldName, Message: "invalid field name in range query"}
-	}
+	switch metadata.Type {
+	case "long", "integer", "float", "double":
+		if num, err := strconv.ParseFloat(value, 64); err == nil {
+			return map[string]any{
+				"term": map[string]any{
+					fieldName: num,
+				},
+			}, nil
+		}
+		return nil, &ParseError{Field: fieldName, Message: "invalid numeric value"}
 
-	// Find the operator end
-	opEnd := opStart + 1
-	if opEnd < len(filter) && (filter[opEnd] == '=' || filter[opEnd] == '>') {
-		opEnd++
-	}
+	case "date":
+		return parseDateValue(fieldName, value)
 
-	operator := filter[opStart:opEnd]
-	if !validOperatorRegex.MatchString(operator) {
-		return nil, &ParseError{Field: fieldName, Message: "invalid range operator"}
-	}
-
-	value := strings.TrimSpace(filter[opEnd:])
-	if value == "" {
-		return nil, &ParseError{Field: fieldName, Message: "missing value in range query"}
-	}
-
-	// Parse the value as number
-	num, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return nil, &ParseError{Field: fieldName, Message: fmt.Sprintf("invalid numeric value in range query: %s", value)}
-	}
-
-	var rangeOp string
-	switch operator {
-	case ">=":
-		rangeOp = "gte"
-	case "<=":
-		rangeOp = "lte"
-	case ">":
-		rangeOp = "gt"
-	case "<":
-		rangeOp = "lt"
+	case "boolean":
+		valueLower := strings.ToLower(value)
+		switch valueLower {
+		case "true", "false":
+			return map[string]any{
+				"term": map[string]any{
+					fieldName: valueLower == "true",
+				},
+			}, nil
+		}
+		return nil, &ParseError{Field: fieldName, Message: "invalid boolean value (must be 'true' or 'false')"}
 	default:
-		return nil, &ParseError{Field: fieldName, Message: "invalid range operator"}
-	}
-
-	rangeQuery := make(map[string]any)
-	fieldQuery := make(map[string]any)
-	opQuery := make(map[string]any)
-	opQuery[rangeOp] = num
-	fieldQuery[fieldName] = opQuery
-	rangeQuery["range"] = fieldQuery
-
-	return rangeQuery, nil
-}
-
-func parseNumericTerm(fieldName, value string) (map[string]any, error) {
-	if num, err := strconv.ParseFloat(value, 64); err == nil {
-		termQuery := make(map[string]any)
-		innerTerm := make(map[string]any)
-		innerTerm[fieldName] = num
-		termQuery["term"] = innerTerm
-		return termQuery, nil
-	}
-	return nil, nil
-}
-
-func parseBooleanTerm(fieldName, value string) (map[string]any, error) {
-	valueLower := strings.ToLower(value)
-	switch valueLower {
-	case "true", "false":
-		termQuery := make(map[string]any)
-		innerTerm := make(map[string]any)
-		innerTerm[fieldName] = valueLower == "true"
-		termQuery["term"] = innerTerm
-		return termQuery, nil
-	}
-	return nil, nil
-}
-
-func parseWildcardTerm(fieldName, value string) (map[string]any, error) {
-	// Check if the string contains unescaped wildcards
-	hasUnescapedWildcard := false
-	escaped := false
-
-	for i, ch := range value {
-		if escaped {
-			escaped = false
-			continue
+		if isNullValue(value) {
+			return buildNullQuery(fieldName), nil
 		}
 
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-
-		if ch == '*' || ch == '?' {
-			if i == 0 {
+		hasWildcard, startsWithWildcard := hasWildcard(value)
+		if hasWildcard {
+			if startsWithWildcard {
 				return nil, &ParseError{Field: fieldName, Message: "wildcard query cannot start with *"}
 			}
-			hasUnescapedWildcard = true
+			return map[string]any{
+				"wildcard": map[string]any{
+					fieldName: unescapeValue(value),
+				},
+			}, nil
 		}
-	}
 
-	if hasUnescapedWildcard {
-		wildcardQuery := make(map[string]any)
-		innerWildcard := make(map[string]any)
-		innerWildcard[fieldName] = unescapeValue(value)
-		wildcardQuery["wildcard"] = innerWildcard
-		return wildcardQuery, nil
+		return map[string]any{
+			"match": map[string]any{
+				fieldName: unescapeValue(value),
+			},
+		}, nil
 	}
-	return nil, nil
 }
-
-// Helper functions
 
 func isValidFieldName(field string) bool {
 	return validFieldNameRegex.MatchString(field)
@@ -438,4 +338,156 @@ func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, er
 			"minimum_should_match": 1,
 		},
 	}, nil
+}
+
+func parseDateValue(fieldName, value string) (map[string]any, error) {
+	// Try parse as unix timestamp first
+	if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
+		var timestamp int64
+		if ts > 1000000000000 { // Likely milliseconds
+			timestamp = ts
+		} else {
+			timestamp = ts * 1000 // Convert to milliseconds
+		}
+		return map[string]any{
+			"term": map[string]any{
+				fieldName: timestamp,
+			},
+		}, nil
+	}
+
+	// Try as ISO date
+	if _, err := time.Parse(time.RFC3339, value); err == nil {
+		return map[string]any{
+			"term": map[string]any{
+				fieldName: value,
+			},
+		}, nil
+	}
+
+	return nil, &ParseError{Field: fieldName, Message: "invalid date format"}
+}
+
+func parseRangeSyntax(filter string, fieldCache *FieldCache) (map[string]any, error) {
+	// Find the operator
+	var opStart int = -1
+	for i, c := range filter {
+		if c == '>' || c == '<' {
+			opStart = i
+			break
+		}
+	}
+	if opStart == -1 {
+		return nil, nil
+	}
+
+	fieldName := strings.TrimSpace(filter[:opStart])
+	if !isValidFieldName(fieldName) {
+		return nil, &ParseError{Field: fieldName, Message: "invalid field name in range query"}
+	}
+
+	// Get field metadata
+	metadata, exists := fieldCache.Get(fieldName)
+	if !exists {
+		metadata = &FieldMetadata{
+			Type:         "keyword",
+			Searchable:   true,
+			Aggregatable: true,
+			Active:       false,
+		}
+	}
+
+	// Only allow range queries on numeric and date fields
+	if !strings.Contains(metadata.Type, "int") &&
+		!strings.Contains(metadata.Type, "long") &&
+		!strings.Contains(metadata.Type, "float") &&
+		!strings.Contains(metadata.Type, "double") &&
+		metadata.Type != "date" {
+		return nil, &ParseError{Field: fieldName, Message: "range queries only supported on numeric and date fields"}
+	}
+
+	// Find the operator end
+	opEnd := opStart + 1
+	if opEnd < len(filter) && (filter[opEnd] == '=' || filter[opEnd] == '>') {
+		opEnd++
+	}
+
+	operator := filter[opStart:opEnd]
+	if !validOperatorRegex.MatchString(operator) {
+		return nil, &ParseError{Field: fieldName, Message: "invalid range operator"}
+	}
+
+	value := strings.TrimSpace(filter[opEnd:])
+	if value == "" {
+		return nil, &ParseError{Field: fieldName, Message: "missing value in range query"}
+	}
+
+	var rangeValue interface{}
+	if metadata.Type == "date" {
+		// Try parse as timestamp or ISO date
+		if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
+			if ts > 1000000000000 {
+				rangeValue = ts
+			} else {
+				rangeValue = ts * 1000
+			}
+		} else if _, err := time.Parse(time.RFC3339, value); err == nil {
+			rangeValue = value
+		} else {
+			return nil, &ParseError{Field: fieldName, Message: "invalid date format in range query"}
+		}
+	} else {
+		// Parse as number
+		num, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return nil, &ParseError{Field: fieldName, Message: fmt.Sprintf("invalid numeric value in range query: %s", value)}
+		}
+		rangeValue = num
+	}
+
+	var rangeOp string
+	switch operator {
+	case ">=":
+		rangeOp = "gte"
+	case "<=":
+		rangeOp = "lte"
+	case ">":
+		rangeOp = "gt"
+	case "<":
+		rangeOp = "lt"
+	default:
+		return nil, &ParseError{Field: fieldName, Message: "invalid range operator"}
+	}
+
+	return map[string]any{
+		"range": map[string]any{
+			fieldName: map[string]any{
+				rangeOp: rangeValue,
+			},
+		},
+	}, nil
+}
+
+func hasWildcard(value string) (bool, bool) {
+	escaped := false
+	hasWildcard := false
+	startsWithWildcard := false
+
+	for i, ch := range value {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '*' || ch == '?' {
+			hasWildcard = true
+			if i == 0 {
+				startsWithWildcard = true
+			}
+		}
+	}
+	return hasWildcard, startsWithWildcard
 }
