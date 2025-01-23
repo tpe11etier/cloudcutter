@@ -883,6 +883,7 @@ func (vm *Manager) hideLoading() {
 			vm.loadingCancelFunc = nil
 		}
 		vm.spinner.Stop()
+		vm.logger.Info("Loading stopped, current focus:", "primitive", vm.app.GetFocus())
 	}
 }
 
@@ -938,4 +939,8 @@ func (vm *Manager) switchToProdProfile() error {
 	})
 
 	return nil
+}
+
+func (vm *Manager) UpdateViewCommands(commands []header.ViewCommands) {
+	vm.header.SetViewCommands(commands)
 }

@@ -18,28 +18,32 @@ type EnvVar struct {
 	Value string
 }
 
-type Header struct {
-	*tview.Flex
-	leftTable    *tview.Table
-	rightTable   *tview.Table
-	envVars      map[string]string
-	actions      []Action
-	summaryView  *tview.TextView
-	envVarRowMap map[string]int // Maps EnvVar.Key to table row
+type ViewCommands struct {
+	View        string
+	Description string
 }
 
-type SummaryItem struct {
-	Key   string
-	Value string
+type Header struct {
+	*tview.Flex
+	leftTable     *tview.Table
+	leftMidTable  *tview.Table
+	rightMidTable *tview.Table
+	rightTable    *tview.Table
+	envVars       map[string]string
+	actions       []Action
+	envVarRowMap  map[string]int
+	viewCommands  []ViewCommands
 }
 
 func NewHeader() *Header {
 	header := &Header{
-		Flex:         tview.NewFlex(),
-		leftTable:    tview.NewTable(),
-		rightTable:   tview.NewTable(),
-		envVars:      make(map[string]string),
-		envVarRowMap: make(map[string]int),
+		Flex:          tview.NewFlex(),
+		leftTable:     tview.NewTable(),
+		leftMidTable:  tview.NewTable(),
+		rightMidTable: tview.NewTable(),
+		rightTable:    tview.NewTable(),
+		envVars:       make(map[string]string),
+		envVarRowMap:  make(map[string]int),
 		actions: []Action{
 			{Shortcut: "<:>", Description: "Command Mode"},
 			{Shortcut: "<?>", Description: "Help"},
@@ -52,15 +56,21 @@ func NewHeader() *Header {
 	header.SetBorder(true).SetBorderColor(tcell.ColorMediumTurquoise)
 	header.SetDirection(tview.FlexColumn).
 		AddItem(header.leftTable, 0, 1, false).
+		AddItem(header.leftMidTable, 0, 1, false).
+		AddItem(header.rightMidTable, 0, 1, false).
 		AddItem(header.rightTable, 0, 1, false)
 
-	// Set default env vars
 	header.UpdateEnvVar("Profile", "default")
 	header.UpdateEnvVar("Region", "us-west-2")
-
 	header.setupLeftTable()
+	header.setupLeftMidTable()
 
 	return header
+}
+
+type SummaryItem struct {
+	Key   string
+	Value string
 }
 
 func (h *Header) setupLeftTable() {
@@ -106,17 +116,17 @@ func (h *Header) UpdateEnvVar(key, value string) {
 }
 
 func (h *Header) UpdateSummary(items []types.SummaryItem) {
-	h.rightTable.Clear()
-	h.rightTable.SetTitle("Summary").SetTitleAlign(tview.AlignRight)
+	h.rightMidTable.Clear()
+	h.rightMidTable.SetTitle("Summary").SetTitleAlign(tview.AlignRight)
 
-	h.rightTable.SetCell(0, 0, tview.NewTableCell("   Summary").
+	h.rightMidTable.SetCell(0, 0, tview.NewTableCell("   Summary").
 		SetTextColor(style.GruvboxMaterial.Yellow).
 		SetAlign(tview.AlignCenter).
 		SetSelectable(false).
 		SetAttributes(tcell.AttrBold))
 
 	if len(items) == 0 {
-		h.rightTable.SetCell(0, 0, tview.NewTableCell("No Summary Available").
+		h.rightMidTable.SetCell(0, 0, tview.NewTableCell("No Summary Available").
 			SetTextColor(tcell.ColorBeige).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false))
@@ -132,8 +142,8 @@ func (h *Header) UpdateSummary(items []types.SummaryItem) {
 			SetTextColor(tcell.ColorBeige).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
-		h.rightTable.SetCell(i+1, 0, keyCell)
-		h.rightTable.SetCell(i+1, 1, valueCell)
+		h.rightMidTable.SetCell(i+1, 0, keyCell)
+		h.rightMidTable.SetCell(i+1, 1, valueCell)
 	}
 }
 
@@ -143,4 +153,26 @@ func (h *Header) ClearSummary() {
 
 func (h *Header) GetHeight() int {
 	return 5
+}
+
+func (h *Header) setupLeftMidTable() {
+	h.leftMidTable.SetCell(0, 0, tview.NewTableCell("  View Commands").
+		SetTextColor(style.GruvboxMaterial.Yellow).
+		SetAlign(tview.AlignLeft).
+		SetSelectable(false).
+		SetAttributes(tcell.AttrBold))
+}
+
+func (h *Header) SetViewCommands(commands []ViewCommands) {
+	h.leftMidTable.Clear()
+	h.setupLeftMidTable()
+
+	for i, cmd := range commands {
+		cmdText := fmt.Sprintf("[mediumturquoise]%-10s [beige]%s", cmd.View, cmd.Description)
+		cmdCell := tview.NewTableCell(cmdText).
+			SetTextColor(tcell.ColorBeige).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(false)
+		h.leftMidTable.SetCell(i+1, 0, cmdCell)
+	}
 }

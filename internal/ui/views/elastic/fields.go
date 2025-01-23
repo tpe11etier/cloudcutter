@@ -77,7 +77,6 @@ func (v *View) loadFields() error {
 		return err
 	}
 
-	// Gather all discovered fields from the hits
 	discoveredFields := make(map[string]struct{})
 	for _, entry := range entries {
 		fields := entry.GetAvailableFields()
@@ -86,7 +85,6 @@ func (v *View) loadFields() error {
 		}
 	}
 
-	// Check if we need metadata for these discovered fields
 	needMetadata := false
 	for field := range discoveredFields {
 		if _, ok := v.state.data.fieldCache.Get(field); !ok {
@@ -106,7 +104,6 @@ func (v *View) loadFields() error {
 		defer res.Body.Close()
 
 		var fieldCaps FieldCaps
-
 		if err := json.NewDecoder(res.Body).Decode(&fieldCaps); err != nil {
 			return fmt.Errorf("error decoding field caps: %v", err)
 		}
@@ -129,14 +126,13 @@ func (v *View) loadFields() error {
 			v.state.data.fieldCache.Set(f, &meta)
 		}
 
-		// Populate our cache from the FieldCaps response
 		for f, types := range fieldCaps.Fields {
 			for typeName, meta := range types {
 				v.state.data.fieldCache.Set(f, &FieldMetadata{
 					Type:         typeName,
 					Searchable:   meta.Searchable,
 					Aggregatable: meta.Aggregatable,
-					Active:       false, // active in ES
+					Active:       false,
 				})
 				break
 			}
@@ -156,41 +152,28 @@ func (v *View) loadFields() error {
 	v.state.data.fieldOrder = make([]string, len(allFields))
 	copy(v.state.data.fieldOrder, allFields)
 
-	v.state.data.activeFields = make(map[string]bool)
-	if len(allFields) > 0 {
-		firstField := allFields[0]
-		v.state.data.activeFields[firstField] = true
+	if v.state.data.activeFields == nil {
+		v.state.data.activeFields = make(map[string]bool)
 	}
 
-	v.manager.Logger().Debug("Fields loaded",
-		"originalFields", v.state.data.originalFields,
-		"fieldOrder", v.state.data.fieldOrder,
-	)
+	// Set _id as active by default if present
+	for _, field := range allFields {
+		if field == "_id" {
+			v.state.data.activeFields[field] = true
+			break
+		}
+	}
 
-	// Mark these fields as "found in ES" (meta.Active = true if you want)
+	// Mark discovered fields as active in metadata
 	for field := range discoveredFields {
 		if meta, ok := v.state.data.fieldCache.Get(field); ok {
 			meta.Active = true
-			v.manager.Logger().Debug("Set field meta.Active=true", "field", field)
 		}
 	}
 
-	// preserve old selections and ensure `_id` is selected
-	oldActive := v.state.data.activeFields
-	newActive := make(map[string]bool)
-
-	// preserve any old active fields, but only if they're still discovered
-	for field := range oldActive {
-		if _, ok := discoveredFields[field]; ok {
-			newActive[field] = true
-		}
-	}
-
-	v.state.data.activeFields = newActive
-
-	v.manager.Logger().Debug("active fields updated",
-		"activeFields", v.state.data.activeFields,
-	)
+	v.manager.App().QueueUpdateDraw(func() {
+		v.rebuildFieldList()
+	})
 
 	return nil
 }
@@ -220,7 +203,7 @@ func (v *View) updateFieldsFromResults(results []*DocEntry) {
 			}
 		}
 		if allMatch {
-			return // No changes needed
+			return
 		}
 	}
 
@@ -268,27 +251,32 @@ func (v *View) rebuildFieldList() {
 	v.components.fieldList.Clear()
 	v.components.selectedList.Clear()
 
-	// Rebuild both lists.
+	// Build selected fields list
 	for _, field := range v.state.data.fieldOrder {
 		if v.state.data.activeFields[field] {
-			// Field is active => goes to the selected list
+			fieldName := field
 			v.components.selectedList.AddItem(field, "", 0, func() {
-				v.toggleField(field)
-			})
-		} else {
-			// Field is inactive => goes to the unselected list
-			v.components.fieldList.AddItem(field, "", 0, func() {
-				v.toggleField(field)
+				v.toggleField(fieldName)
 			})
 		}
 	}
 
-	v.manager.Logger().Debug("Field list rebuilt successfully")
+	// Build available fields list
+	for _, field := range v.state.data.fieldOrder {
+		if !v.state.data.activeFields[field] {
+			fieldName := field
+			v.components.fieldList.AddItem(field, "", 0, func() {
+				v.toggleField(fieldName)
+			})
+		}
+	}
 }
 
 func (v *View) toggleField(field string) {
+	v.state.mu.Lock()
 	isActive := v.state.data.activeFields[field]
 	v.state.data.activeFields[field] = !isActive
+	v.state.mu.Unlock()
 
 	if !isActive {
 		v.components.selectedList.AddItem(field, "", 0, func() {
@@ -318,51 +306,56 @@ func (v *View) toggleField(field string) {
 }
 
 func (v *View) filterFieldList(filter string) {
+	v.manager.Logger().Debug("Filtering field list",
+		"filter", filter,
+		"originalFieldsCount", len(v.state.data.originalFields),
+		"activeFieldsCount", len(v.state.data.activeFields))
+
 	v.state.data.currentFilter = filter
 	v.components.fieldList.Clear()
 
-	if filter == "" {
-		v.state.data.fieldMatches = nil
-		v.rebuildFieldList()
-		v.manager.UpdateStatusBar("Showing all fields")
+	// Ensure we have fields to work with
+	if len(v.state.data.originalFields) == 0 {
+		v.manager.Logger().Warn("No original fields available")
 		return
 	}
 
-	filter = strings.ToLower(filter)
-	var matchedFields []string // Changed name to avoid conflict
+	fieldsToShow := v.state.data.originalFields
+	if filter != "" {
+		// When filtering, only show fields that match the filter
+		filter = strings.ToLower(filter)
+		matchedFields := make([]string, 0)
 
-	// Add debug logging
-	v.manager.Logger().Debug("Filtering fields",
-		"filter", filter,
-		"originalFields", v.state.data.originalFields,
-		"activeFields", v.state.data.activeFields)
+		for _, field := range v.state.data.originalFields {
+			if strings.Contains(strings.ToLower(field), filter) {
+				matchedFields = append(matchedFields, field)
+			}
+		}
 
-	// Only show fields that match the filter AND are not currently active
-	for _, field := range v.state.data.originalFields {
-		isActive := v.state.data.activeFields[field]
-		containsFilter := strings.Contains(strings.ToLower(field), filter)
+		v.state.data.fieldMatches = matchedFields
+		fieldsToShow = matchedFields
+	} else {
+		v.state.data.fieldMatches = nil
+		// When not filtering, show all fields
+		fieldsToShow = v.state.data.originalFields
+	}
 
-		v.manager.Logger().Debug("Field filter check",
-			"field", field,
-			"isActive", isActive,
-			"containsFilter", containsFilter)
-
-		if containsFilter && !isActive {
-			matchedFields = append(matchedFields, field)
+	// Only show fields that aren't currently active
+	for _, field := range fieldsToShow {
+		if !v.state.data.activeFields[field] {
+			fieldName := field // Capture for closure
+			v.components.fieldList.AddItem(field, "", 0, func() {
+				v.toggleField(fieldName)
+			})
 		}
 	}
 
-	v.state.data.fieldMatches = matchedFields
-
-	for _, field := range matchedFields {
-		displayText := field
-		fieldName := field
-		v.components.fieldList.AddItem(displayText, "", 0, func() {
-			v.toggleField(fieldName)
-		})
+	if filter != "" {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)",
+			filter, v.components.fieldList.GetItemCount()))
+	} else {
+		v.manager.UpdateStatusBar("Showing all available fields")
 	}
-
-	v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)", filter, len(matchedFields)))
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {

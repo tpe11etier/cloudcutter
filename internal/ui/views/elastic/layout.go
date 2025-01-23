@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
@@ -339,6 +340,11 @@ func (v *View) setupLayout() {
 	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 	v.components.listsContainer = v.manager.GetPrimitiveByID("listsContainer").(*tview.Flex)
 
+	v.manager.UpdateViewCommands([]header.ViewCommands{
+		{View: "ctrl+a", Description: "Available Fields"},
+		{View: "ctrl+s", Description: "Selected Fields"},
+		{View: "ctrl+r", Description: "Results"},
+	})
 	v.components.localFilterInput.SetChangedFunc(func(text string) {
 		v.displayFilteredResults(text)
 	})

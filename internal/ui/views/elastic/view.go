@@ -178,6 +178,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 				v.manager.SetFocus(v.components.filterInput)
 			default:
 				v.manager.HideAllModals()
+				v.manager.SetFocus(v.components.filterInput)
 			}
 			return nil
 		}
@@ -270,6 +271,5 @@ func (v *View) initTimeframeState() {
 func (v *View) refreshWithCurrentTimeframe() {
 	timeframe := strings.TrimSpace(v.components.timeframeInput.GetText())
 	v.state.search.timeframe = timeframe
-
 	v.refreshResults()
 }

@@ -61,6 +61,9 @@ func NewHelp() *Help {
 					{Key: "/", Description: "Filter"},
 					{Key: ":", Description: "Command prompt"},
 					{Key: "Tab", Description: "Cycle through fields"},
+					{Key: "Shift+Tab", Description: "Cycle through fields (reverse)"},
+					{Key: ":region", Description: "Change AWS region"},
+					{Key: ":profile", Description: "Change Profile"},
 				},
 			},
 			{
@@ -68,13 +71,6 @@ func NewHelp() *Help {
 				Commands: []Command{
 					{Key: ":dynamodb", Description: "Switch to DynamoDB view"},
 					{Key: ":elastic", Description: "Switch to Elastic view"},
-				},
-			},
-			{
-				Title: "AWS",
-				Commands: []Command{
-					{Key: ":region", Description: "Change AWS region"},
-					{Key: ":profile", Description: "Change Profile"},
 				},
 			},
 		},
