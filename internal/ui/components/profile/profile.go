@@ -143,6 +143,8 @@ func (ps *Selector) discoverProfiles() []string {
 		profileMap["default"] = struct{}{}
 	}
 
+	// add local profile to connect to local Docker instance
+	profileMap["local"] = struct{}{}
 	// Convert map to sorted slice
 	profiles := make([]string, 0, len(profileMap))
 	for profile := range profileMap {
