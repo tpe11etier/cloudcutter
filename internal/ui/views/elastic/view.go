@@ -131,6 +131,9 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyTab:
 			return v.handleTabKey(currentFocus)
+		case tcell.KeyBacktab:
+			return v.handleShiftTabKey(currentFocus)
+
 		case tcell.KeyRune:
 			switch event.Rune() {
 			case 'r':

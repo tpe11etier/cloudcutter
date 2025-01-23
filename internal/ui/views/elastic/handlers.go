@@ -320,3 +320,29 @@ func (v *View) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
 	}
 	return event
 }
+
+func (v *View) handleShiftTabKey(currentFocus tview.Primitive) *tcell.EventKey {
+	switch currentFocus {
+	case v.components.filterInput:
+		v.manager.App().SetFocus(v.components.resultsTable)
+	case v.components.resultsTable:
+		v.manager.App().SetFocus(v.components.selectedList)
+	case v.components.selectedList:
+		v.manager.App().SetFocus(v.components.fieldList)
+	case v.components.fieldList:
+		v.manager.App().SetFocus(v.components.localFilterInput)
+	case v.components.localFilterInput:
+		v.manager.App().SetFocus(v.components.numResultsInput)
+	case v.components.numResultsInput:
+		v.manager.App().SetFocus(v.components.timeframeInput)
+	case v.components.timeframeInput:
+		v.manager.App().SetFocus(v.components.indexInput)
+	case v.components.indexInput:
+		v.manager.App().SetFocus(v.components.activeFilters)
+	case v.components.activeFilters:
+		v.manager.App().SetFocus(v.components.filterInput)
+	default:
+		v.manager.App().SetFocus(v.components.filterInput)
+	}
+	return tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)
+}
