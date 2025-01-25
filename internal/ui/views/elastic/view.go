@@ -87,7 +87,7 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 	err := v.initFieldsSync()
 	if err != nil {
 		v.manager.Logger().Error("Failed to initialize fields", "error", err)
-		return v, err
+		// don't return here so the view continues to load
 	}
 
 	v.components.timeframeInput.SetText("today")
@@ -107,22 +107,6 @@ func (v *View) Content() tview.Primitive {
 }
 
 func (v *View) Hide() {}
-
-func (v *View) ActiveField() string {
-	currentFocus := v.manager.App().GetFocus()
-	switch currentFocus {
-	case v.components.filterInput:
-		return "filterInput"
-	case v.components.indexInput:
-		return "indexInput"
-	case v.components.localFilterInput:
-		return "localFilterInput"
-	case v.components.timeframeInput:
-		return "timeframeInput"
-	default:
-		return ""
-	}
-}
 
 func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	return func(event *tcell.EventKey) *tcell.EventKey {

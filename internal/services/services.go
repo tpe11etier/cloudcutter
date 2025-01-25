@@ -22,10 +22,12 @@ func New(cfg aws.Config, region string) (*Services, error) {
 	}, nil
 }
 
-func (s *Services) InitializeDynamoDB(cfg aws.Config) {
+// TODO - fix error reporting
+func (s *Services) InitializeDynamoDB(cfg aws.Config) error {
 	if s.DynamoDB == nil {
 		s.DynamoDB = dynamodb.NewService(cfg)
 	}
+	return nil
 }
 
 func (s *Services) InitializeElastic(cfg aws.Config) error {
@@ -54,4 +56,5 @@ func (s *Services) ReinitializeWithConfig(cfg aws.Config, viewName string) error
 	}
 
 	return nil
+	
 }

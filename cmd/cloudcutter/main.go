@@ -2,17 +2,18 @@ package main
 
 import (
 	"context"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"log"
-	"strings"
-
+	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/logger"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"log"
+	"os"
+	"strings"
+
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
-	awsservice "github.com/tpelletiersophos/cloudcutter/internal/services/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
@@ -38,27 +39,19 @@ func init() {
 	viper.AutomaticEnv()
 }
 
-func initializeServices(cfg aws.Config, region string) (*services.Services, error) {
-	return services.New(cfg, region)
-}
-
 func runApplication() {
-
 	ctx := context.Background()
 	app := ui.NewApp()
 
-	logDir := "./logs"
-	logPrefix := "cloudcutter"
 	logLevel := strings.ToLower(viper.GetString("logging"))
-
 	level, err := logger.ParseLevel(logLevel)
 	if err != nil {
 		log.Fatalf("Invalid log level %q: %v", logLevel, err)
 	}
 
 	logInstance, err := logger.New(logger.Config{
-		LogDir: logDir,
-		Prefix: logPrefix,
+		LogDir: "./logs",
+		Prefix: "cloudcutter",
 		Level:  level,
 	})
 	if err != nil {
@@ -66,38 +59,41 @@ func runApplication() {
 	}
 	defer logInstance.Close()
 
-	defaultRegion := "us-west-2"
-	awsConfig, err := awsservice.Authenticate("default", defaultRegion)
+	defaultConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
 	if err != nil {
-		log.Fatalf("Failed to initialize AWS config: %v", err)
+		logInstance.Error("Failed to load default config", "error", err)
+		defaultConfig = awssdk.Config{}
 	}
 
-	viewManager := manager.NewViewManager(ctx, app, awsConfig, logInstance)
+	viewManager := manager.NewViewManager(ctx, app, defaultConfig, logInstance)
 
-	services, err := initializeServices(awsConfig, defaultRegion)
-	if err != nil {
-		log.Fatalf("Failed to initialize services: %v", err)
-	}
+	// Show the profile selector if not authenticated
+	viewManager.EnsureAuthenticated()
 
+	// Register lazy views
+	services, _ := services.New(defaultConfig, "us-west-2")
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
-		services.InitializeDynamoDB(awsConfig)
-		return ddbv.NewView(viewManager, services.DynamoDB), nil
-	})
-
-	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
-		if err := services.InitializeElastic(awsConfig); err != nil {
+		currentConfig := viewManager.GetCurrentConfig()
+		if err := services.InitializeDynamoDB(currentConfig); err != nil {
 			return nil, err
 		}
-		return elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
+		return ddbv.NewView(viewManager, services.DynamoDB), nil
+	})
+	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
+		currentConfig := viewManager.GetCurrentConfig()
+		if err := services.InitializeElastic(currentConfig); err != nil {
+			return nil, err
+		}
+		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create elastic view: %w", err)
+		}
+		return elasticViewInstance, nil
 	})
 
-	// Set initial view
-	if err := viewManager.SwitchToView(manager.ViewElastic); err != nil {
-		log.Fatalf("Failed to set initial view: %v", err)
-	}
-	// Run the application
 	if err := viewManager.Run(); err != nil {
-		log.Fatalf("Application error: %v", err)
+		logInstance.Error("Application error", "error", err)
+		os.Exit(1)
 	}
 }
 

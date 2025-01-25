@@ -12,7 +12,6 @@ type View interface {
 	Show()
 	Hide()
 	InputHandler() func(event *tcell.EventKey) *tcell.EventKey
-	ActiveField() string
 }
 
 type Reinitializer interface {
