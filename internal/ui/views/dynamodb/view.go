@@ -242,18 +242,6 @@ func (v *View) initializeTableCache() {
 	v.wg.Wait()
 }
 
-func (v *View) ActiveField() string {
-	currentFocus := v.manager.App().GetFocus()
-	switch currentFocus {
-	case v.leftPanel:
-		return "leftPanel"
-	case v.dataTable:
-		return "dataTable"
-	default:
-		return ""
-	}
-}
-
 func (v *View) setupLayout() {
 	layoutCfg := types.LayoutConfig{
 		Title:     "DynamoDB",
@@ -604,10 +592,16 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 	v.leftPanel.Clear()
 	v.dataTable.Clear()
 
-	// Only initialize if we're the active view
-	if v.manager.ActiveView() == v.Content() {
-		v.manager.UpdateStatusBar("Fetching tables...")
-		v.initializeTableCache()
+	v.manager.UpdateStatusBar("Reinitializing DynamoDB...")
+	v.initializeTableCache()
+
+	tableNames := make([]string, 0, len(v.state.tableCache))
+	for tableName := range v.state.tableCache {
+		tableNames = append(tableNames, tableName)
+	}
+	sort.Strings(tableNames)
+	for _, tName := range tableNames {
+		v.leftPanel.AddItem(tName, "", 0, nil)
 	}
 
 	return nil

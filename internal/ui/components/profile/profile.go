@@ -122,27 +122,6 @@ func (ps *Selector) discoverProfiles() []string {
 		}
 	}
 
-	// Load profiles from config file
-	configFile := filepath.Join(homedir, ".aws", "config")
-	if cfgFile, err := ini.Load(configFile); err == nil {
-		for _, section := range cfgFile.Sections() {
-			name := section.Name()
-			// Config file uses "profile prefix" except for default
-			if name != ini.DefaultSection {
-				name = strings.TrimPrefix(name, "profile ")
-				profileMap[name] = struct{}{}
-			}
-		}
-	}
-
-	// Add default profile if either file exists
-	if _, err := os.Stat(credFile); err == nil {
-		profileMap["default"] = struct{}{}
-	}
-	if _, err := os.Stat(configFile); err == nil {
-		profileMap["default"] = struct{}{}
-	}
-
 	// add local profile to connect to local Docker instance
 	profileMap["local"] = struct{}{}
 	// Convert map to sorted slice

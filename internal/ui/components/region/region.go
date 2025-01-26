@@ -1,6 +1,7 @@
 package region
 
 import (
+	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
@@ -52,12 +53,16 @@ func NewRegionSelector(onSelect func(string), onCancel func(), statusBar *status
 	}
 
 	selector.SetSelectedFunc(func(index int, name string, secondName string, shortcut rune) {
-		selector.HideRegionSelector()
-
 		if selector.onSelect != nil {
-			selector.onSelect(name)
+			go func() {
+				if err := selector.manager.UpdateRegion(name); err != nil {
+					selector.statusBar.SetText(fmt.Sprintf("Error switching region: %v", err))
+				}
+			}()
 		}
+		selector.HideRegionSelector()
 	})
+
 	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEsc {
 			if selector.onCancel != nil {

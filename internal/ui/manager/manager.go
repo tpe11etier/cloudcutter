@@ -54,6 +54,10 @@ type Manager struct {
 	profileHandler     *profile.Handler
 }
 
+func (vm *Manager) GetCurrentConfig() aws.Config {
+	return vm.awsConfig
+}
+
 func (vm *Manager) Pages() *tview.Pages {
 	return vm.pages
 }
@@ -182,7 +186,7 @@ func (vm *Manager) createModalFlex(content tview.Primitive, width int, height in
 
 func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 	handlers := map[string]func() (tview.Primitive, error){
-		"profile":  vm.showProfileSelector,
+		"profile":  vm.ShowProfileSelector,
 		"region":   vm.showRegionSelector,
 		"dynamodb": func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewDynamoDB) },
 		"elastic":  func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewElastic) },
@@ -519,6 +523,11 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			vm.hideProfileSelector()
 			return nil
 		}
+		if vm.pages.HasPage("regionSelector") {
+			vm.hideRegionSelector()
+			return nil
+		}
+
 		if vm.pages.HasPage(ModalJSON) {
 			vm.hideJSON()
 			return nil
@@ -579,9 +588,14 @@ func (vm *Manager) switchToDevProfile() error {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "opal_dev")
-		if err := vm.reinitializeViews(); err != nil {
+
+		if err := vm.reinitializeActiveView(); err != nil {
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
 			return
+		}
+
+		if err := vm.SwitchToView(ViewElastic); err != nil {
+			vm.Logger().Error("Failed to switch to Elastic after dev profile", "error", err)
 		}
 
 		vm.StatusChan <- "Successfully switched to dev profile"
@@ -599,7 +613,6 @@ func (vm *Manager) switchToLocalProfile() error {
 
 	vm.logger.Info("Starting local profile switch")
 	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
-		vm.logger.Info("Inside local profile callback")
 		if err != nil {
 			vm.logger.Error("Failed to switch to local profile", "error", err)
 			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
@@ -608,11 +621,17 @@ func (vm *Manager) switchToLocalProfile() error {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "local")
-		vm.logger.Info("About to reinitialize views")
-		if err := vm.reinitializeViews(); err != nil {
-			vm.logger.Error("Error reinitializing views", "error", err)
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
+
+		// Instead of calling vm.reinitializeViews() here:
+		if err := vm.reinitializeActiveView(); err != nil {
+			vm.logger.Error("Error reinitializing active view", "error", err)
+			vm.StatusChan <- fmt.Sprintf("Error reinitializing active view: %v", err)
 			return
+		}
+
+		// Switch to a default or main view if you wish
+		if err := vm.SwitchToView(ViewElastic); err != nil {
+			vm.logger.Error("Failed to switch to Elastic after local profile", "error", err)
 		}
 
 		vm.StatusChan <- "Successfully switched to local profile"
@@ -622,40 +641,26 @@ func (vm *Manager) switchToLocalProfile() error {
 }
 
 func (vm *Manager) reinitializeViews() error {
-	currentViewName := ""
 	if vm.activeView != nil {
-		currentViewName = vm.activeView.Name()
-	}
-
-	var reinitErrors []error
-
-	for name, view := range vm.views {
-		if reinitView, ok := view.(views.Reinitializer); ok {
+		activeName := vm.activeView.Name()
+		if reinitView, ok := vm.activeView.(views.Reinitializer); ok {
 			if err := reinitView.Reinitialize(vm.awsConfig); err != nil {
-				reinitErrors = append(reinitErrors, fmt.Errorf("failed to reinitialize %s view: %w", name, err))
+				return fmt.Errorf("failed to reinitialize %s view: %w", activeName, err)
 			}
 		}
 	}
-
-	if len(reinitErrors) > 0 {
-		return fmt.Errorf("reinitialization errors: %v", reinitErrors)
-	}
-
-	if currentViewName != "" {
-		return vm.SwitchToView(currentViewName)
-	}
-
 	return nil
 }
 
-func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
+func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
 		func(profile string) {
-			vm.app.SetFocus(vm.activeView.Content())
+			if vm.activeView != nil {
+				vm.app.SetFocus(vm.activeView.Content())
+			}
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
-
 			switch profile {
 			case "opal_dev":
 				vm.switchToDevProfile()
@@ -663,6 +668,8 @@ func (vm *Manager) showProfileSelector() (tview.Primitive, error) {
 				vm.switchToProdProfile()
 			case "local":
 				vm.switchToLocalProfile()
+			default:
+				vm.switchToStandardProfile(profile)
 			}
 		},
 		func() {
@@ -721,27 +728,18 @@ func (vm *Manager) startStatusListener() {
 }
 
 func (vm *Manager) UpdateRegion(region string) error {
-	vm.showLoading("Switching regions...")
+	cfg := vm.awsConfig.Copy()
+	cfg.Region = region
+	vm.awsConfig = cfg
 
-	go func() {
-		cfg := vm.awsConfig.Copy()
-		cfg.Region = region
+	// Re-init only the active view, if it’s a Reinitializer
+	if err := vm.reinitializeActiveView(); err != nil {
+		vm.StatusChan <- fmt.Sprintf("Error reinitializing active view in new region: %v", err)
+		return err
+	}
 
-		vm.awsConfig = cfg
-
-		vm.App().QueueUpdateDraw(func() {
-			vm.header.UpdateEnvVar("Region", region)
-		})
-
-		if err := vm.reinitializeViews(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views with new region: %v", err)
-			return
-		}
-
-		vm.hideLoading()
-		vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
-	}()
-
+	vm.header.UpdateEnvVar("Region", region)
+	vm.StatusChan <- fmt.Sprintf("Switched region to %s (active view reinitialized)", region)
 	return nil
 }
 
@@ -930,7 +928,7 @@ func (vm *Manager) switchToProdProfile() error {
 			vm.spinner.StartWithContext(ctx, vm.App())
 		}
 
-		if err := vm.reinitializeViews(); err != nil {
+		if err := vm.reinitializeActiveView(); err != nil {
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
 			return
 		}
@@ -943,4 +941,47 @@ func (vm *Manager) switchToProdProfile() error {
 
 func (vm *Manager) UpdateViewCommands(commands []header.ViewCommands) {
 	vm.header.SetViewCommands(commands)
+}
+
+func (vm *Manager) GetStatusBar() *statusbar.StatusBar {
+	return vm.statusBar
+}
+
+func (vm *Manager) switchToStandardProfile(profile string) {
+	if vm.profileHandler.IsAuthenticating() {
+		status := "Authentication already in progress"
+		vm.StatusChan <- status
+		return
+	}
+
+	vm.profileHandler.SwitchProfile(vm.ctx, profile, func(cfg aws.Config, err error) {
+		if err != nil {
+			vm.StatusChan <- fmt.Sprintf("Failed to switch to profile %s: %v", profile, err)
+			return
+		}
+
+		vm.awsConfig = cfg
+		vm.header.UpdateEnvVar("Profile", profile)
+
+		if err := vm.reinitializeViews(); err != nil {
+			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
+			return
+		}
+
+		if err := vm.SwitchToView(ViewElastic); err != nil {
+			vm.Logger().Error("Failed to switch to Elastic after standard profile", "error", err)
+		}
+
+		vm.StatusChan <- fmt.Sprintf("Successfully switched to profile %s", profile)
+	})
+}
+
+func (vm *Manager) reinitializeActiveView() error {
+	if vm.activeView == nil {
+		return nil
+	}
+	if reinit, ok := vm.activeView.(views.Reinitializer); ok {
+		return reinit.Reinitialize(vm.awsConfig)
+	}
+	return nil
 }

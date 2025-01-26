@@ -159,5 +159,3 @@ func (a *Authenticator) authenticateLocal(ctx context.Context, region string) (a
 	}
 	return config.LoadDefaultConfig(ctx, opts...)
 }
-
-// profile/handler.go
