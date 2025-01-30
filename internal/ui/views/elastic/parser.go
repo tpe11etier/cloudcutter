@@ -248,18 +248,13 @@ func unescapeValue(value string) string {
 	return result.String()
 }
 
-// ParseTimeframe converts a timeframe string (e.g., "12h", "7d") to time.Duration
+// ParseTimeframe assumes input has already been validated by ValidateTimeframe
 func ParseTimeframe(timeframe string) (time.Duration, error) {
 	timeframe = strings.TrimSpace(strings.ToLower(timeframe))
-	if timeframe == "" {
-		return 0, fmt.Errorf("empty timeframe")
-	}
 
-	// Handle special keywords
 	switch timeframe {
 	case "today":
 		now := time.Now()
-		// Set startOfDay to midnight, so the duration is how long it’s been since 00:00
 		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		return now.Sub(startOfDay), nil
 	case "week":
@@ -272,23 +267,10 @@ func ParseTimeframe(timeframe string) (time.Duration, error) {
 		return 365 * 24 * time.Hour, nil
 	}
 
-	// Parse numeric value with unit
 	length := len(timeframe)
-	if length < 2 {
-		return 0, fmt.Errorf("invalid timeframe format: %s", timeframe)
-	}
-
-	value, err := strconv.Atoi(timeframe[:length-1])
-	if err != nil {
-		return 0, fmt.Errorf("invalid timeframe number: %s", timeframe)
-	}
-
-	if value < 0 {
-		return 0, fmt.Errorf("timeframe cannot be negative: %s", timeframe)
-	}
-
-	// Get the unit
+	value, _ := strconv.Atoi(timeframe[:length-1])
 	unit := timeframe[length-1:]
+
 	switch unit {
 	case "h", "H":
 		return time.Duration(value) * time.Hour, nil
@@ -297,7 +279,7 @@ func ParseTimeframe(timeframe string) (time.Duration, error) {
 	case "w", "W":
 		return time.Duration(value) * 7 * 24 * time.Hour, nil
 	default:
-		return 0, fmt.Errorf("invalid timeframe unit: %s (supported: h,d,w)", unit)
+		return 0, fmt.Errorf("internal error: invalid unit %s passed validation", unit)
 	}
 }
 
@@ -305,6 +287,10 @@ func ParseTimeframe(timeframe string) (time.Duration, error) {
 func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, error) {
 	if timeframe == "" {
 		return nil, nil
+	}
+
+	if err := ValidateTimeframe(timeframe); err != nil {
+		return nil, err
 	}
 
 	duration, err := ParseTimeframe(timeframe)
@@ -490,4 +476,65 @@ func hasWildcard(value string) (bool, bool) {
 		}
 	}
 	return hasWildcard, startsWithWildcard
+}
+
+func ValidateTimeframe(timeframe string) error {
+	timeframe = strings.TrimSpace(strings.ToLower(timeframe))
+	if timeframe == "" {
+		return fmt.Errorf("empty timeframe")
+	}
+
+	// Check valid keywords first
+	switch timeframe {
+	case "today", "week", "month", "quarter", "year":
+		return nil
+	}
+
+	// Check for invalid variations of keywords
+	keywords := []string{"today", "week", "month", "quarter", "year"}
+	for _, keyword := range keywords {
+		if strings.HasPrefix(timeframe, keyword) && timeframe != keyword {
+			return fmt.Errorf("invalid timeframe: did you mean '%s'?", keyword)
+		}
+	}
+
+	// Must be at least 2 chars for numeric format
+	if len(timeframe) < 2 {
+		return fmt.Errorf("invalid timeframe format (must be at least 2 characters)")
+	}
+
+	// Find the last digit position
+	lastDigitPos := -1
+	for i := len(timeframe) - 1; i >= 0; i-- {
+		if timeframe[i] >= '0' && timeframe[i] <= '9' {
+			lastDigitPos = i
+			break
+		}
+	}
+
+	if lastDigitPos == -1 {
+		return fmt.Errorf("invalid timeframe: no numeric value found")
+	}
+
+	// Split into value and unit
+	valueStr := timeframe[:lastDigitPos+1]
+	unit := timeframe[lastDigitPos+1:]
+
+	// Validate number
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return fmt.Errorf("invalid timeframe number: %s", valueStr)
+	}
+
+	if value < 0 {
+		return fmt.Errorf("timeframe cannot be negative")
+	}
+
+	// Validate unit
+	switch unit {
+	case "h", "H", "d", "D", "w", "W":
+		return nil
+	default:
+		return fmt.Errorf("invalid timeframe unit: %s (supported: h,d,w)", unit)
+	}
 }
