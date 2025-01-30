@@ -286,6 +286,11 @@ func (v *View) handleTimeframeInput(event *tcell.EventKey) *tcell.EventKey {
 		v.manager.SetFocus(v.components.filterInput)
 		return nil
 	case tcell.KeyEnter:
+		timeframe := v.components.timeframeInput.GetText()
+		if err := ValidateTimeframe(timeframe); err != nil {
+			v.manager.UpdateStatusBar(fmt.Sprintf("Error: %v", err))
+			return nil
+		}
 		v.state.search.timeframe = v.components.timeframeInput.GetText()
 		v.refreshWithCurrentTimeframe()
 		return nil

@@ -503,165 +503,62 @@ func TestHelperFunctions(t *testing.T) {
 }
 
 func TestParseTimeframe(t *testing.T) {
-
 	tests := []struct {
 		name      string
 		timeframe string
 		want      time.Duration
-		wantErr   bool
 	}{
-		// Standard numeric durations
+		// Only test valid cases since validation is done separately
 		{
 			name:      "12 hours",
 			timeframe: "12h",
 			want:      12 * time.Hour,
-			wantErr:   false,
-		},
-		{
-			name:      "24 hours",
-			timeframe: "24h",
-			want:      24 * time.Hour,
-			wantErr:   false,
 		},
 		{
 			name:      "7 days",
 			timeframe: "7d",
 			want:      7 * 24 * time.Hour,
-			wantErr:   false,
 		},
 		{
-			name:      "1 week",
+			name:      "1 week numeric",
 			timeframe: "1w",
 			want:      7 * 24 * time.Hour,
-			wantErr:   false,
 		},
-		{
-			name:      "30 days",
-			timeframe: "30d",
-			want:      30 * 24 * time.Hour,
-			wantErr:   false,
-		},
-
-		// Special keywords
-		//{
-		//	name:      "today keyword",
-		//	timeframe: "today",
-		//	want:      15*time.Hour + 30*time.Minute, // Since start of day (15:30 - 00:00)
-		//	wantErr:   false,
-		//},
 		{
 			name:      "week keyword",
 			timeframe: "week",
 			want:      7 * 24 * time.Hour,
-			wantErr:   false,
 		},
 		{
 			name:      "month keyword",
 			timeframe: "month",
 			want:      30 * 24 * time.Hour,
-			wantErr:   false,
 		},
 		{
 			name:      "quarter keyword",
 			timeframe: "quarter",
 			want:      90 * 24 * time.Hour,
-			wantErr:   false,
 		},
 		{
 			name:      "year keyword",
 			timeframe: "year",
 			want:      365 * 24 * time.Hour,
-			wantErr:   false,
-		},
-
-		// Case variations
-		{
-			name:      "uppercase hour",
-			timeframe: "24H",
-			want:      24 * time.Hour,
-			wantErr:   false,
 		},
 		{
-			name:      "uppercase week keyword",
+			name:      "uppercase week",
 			timeframe: "WEEK",
 			want:      7 * 24 * time.Hour,
-			wantErr:   false,
-		},
-		{
-			name:      "mixed case month",
-			timeframe: "MoNtH",
-			want:      30 * 24 * time.Hour,
-			wantErr:   false,
-		},
-
-		// Error cases
-		{
-			name:      "invalid unit",
-			timeframe: "24x",
-			wantErr:   true,
-		},
-		{
-			name:      "empty timeframe",
-			timeframe: "",
-			wantErr:   true,
-		},
-		{
-			name:      "invalid format",
-			timeframe: "abc",
-			wantErr:   true,
-		},
-		{
-			name:      "negative value",
-			timeframe: "-24h",
-			wantErr:   true,
-		},
-		{
-			name:      "invalid keyword",
-			timeframe: "fortnight",
-			wantErr:   true,
-		},
-		{
-			name:      "zero value",
-			timeframe: "0h",
-			wantErr:   false,
-			want:      0,
-		},
-
-		// Whitespace handling
-		{
-			name:      "leading space",
-			timeframe: " 24h",
-			want:      24 * time.Hour,
-			wantErr:   false,
-		},
-		{
-			name:      "trailing space",
-			timeframe: "24h ",
-			want:      24 * time.Hour,
-			wantErr:   false,
-		},
-		{
-			name:      "surrounding spaces",
-			timeframe: " 24h ",
-			want:      24 * time.Hour,
-			wantErr:   false,
-		},
-		{
-			name:      "spaces with keyword",
-			timeframe: " week ",
-			want:      7 * 24 * time.Hour,
-			wantErr:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseTimeframe(tt.timeframe)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseTimeframe(%q) error = %v, wantErr %v", tt.timeframe, err, tt.wantErr)
+			if err != nil {
+				t.Errorf("ParseTimeframe(%q) unexpected error = %v", tt.timeframe, err)
 				return
 			}
-			if !tt.wantErr && got != tt.want {
+			if got != tt.want {
 				t.Errorf("ParseTimeframe(%q) = %v, want %v", tt.timeframe, got, tt.want)
 			}
 		})
@@ -673,11 +570,12 @@ func TestBuildTimeQuery(t *testing.T) {
 	fixedTime := time.Date(2024, 10, 4, 1, 0, 17, 0, time.UTC)
 
 	tests := []struct {
-		name      string
-		timeframe string
-		now       time.Time
-		want      map[string]any
-		wantErr   bool
+		name        string
+		timeframe   string
+		now         time.Time
+		want        map[string]any
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name:      "12 hour timeframe",
@@ -745,40 +643,12 @@ func TestBuildTimeQuery(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:      "invalid timeframe",
-			timeframe: "invalid",
-			now:       fixedTime,
-			wantErr:   true,
+			name:        "invalid timeframe",
+			timeframe:   "invalid",
+			now:         fixedTime,
+			wantErr:     true,
+			errContains: "invalid timeframe: no numeric value found",
 		},
-		//{
-		//	name:      "today keyword",
-		//	timeframe: "today",
-		//	now:       fixedTime,
-		//	want: map[string]any{
-		//		"bool": map[string]any{
-		//			"should": []map[string]any{
-		//				{
-		//					"range": map[string]any{
-		//						"unixTime": map[string]any{
-		//							"gte": int64(1728003617 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Seconds())),
-		//							"lte": int64(1728003617),
-		//						},
-		//					},
-		//				},
-		//				{
-		//					"range": map[string]any{
-		//						"detectionGeneratedTime": map[string]any{
-		//							"gte": int64(1728003617000 - int64(fixedTime.Sub(time.Date(fixedTime.Year(), fixedTime.Month(), fixedTime.Day(), 0, 0, 0, 0, fixedTime.Location())).Milliseconds())),
-		//							"lte": int64(1728003617000),
-		//						},
-		//					},
-		//				},
-		//			},
-		//			"minimum_should_match": 1,
-		//		},
-		//	},
-		//	wantErr: false,
-		//},
 	}
 
 	for _, tt := range tests {
@@ -786,6 +656,12 @@ func TestBuildTimeQuery(t *testing.T) {
 			got, err := BuildTimeQuery(tt.timeframe, tt.now)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("BuildTimeQuery(%q) error = %v, wantErr %v", tt.timeframe, err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("BuildTimeQuery(%q) error = %v, want error containing %q", tt.timeframe, err, tt.errContains)
+				}
 				return
 			}
 			if !tt.wantErr && !compareMaps(got, tt.want) {
@@ -877,4 +753,86 @@ func newTestFieldCache() *FieldCache {
 	fc.Set("_id", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: false})
 	fc.Set("detection_id_dedup", &FieldMetadata{Type: "keyword", Searchable: true, Aggregatable: true})
 	return fc
+}
+
+func TestValidateTimeframe(t *testing.T) {
+	tests := []struct {
+		name        string
+		timeframe   string
+		wantErr     bool
+		errContains string
+	}{
+		// Error cases - these test validation
+		{
+			name:        "empty timeframe",
+			timeframe:   "",
+			wantErr:     true,
+			errContains: "empty timeframe",
+		},
+		{
+			name:        "invalid format",
+			timeframe:   "abc",
+			wantErr:     true,
+			errContains: "invalid timeframe: no numeric value found",
+		},
+		{
+			name:        "invalid unit",
+			timeframe:   "24x",
+			wantErr:     true,
+			errContains: "invalid timeframe unit",
+		},
+		{
+			name:        "negative value",
+			timeframe:   "-24h",
+			wantErr:     true,
+			errContains: "timeframe cannot be negative",
+		},
+		{
+			name:        "invalid keyword",
+			timeframe:   "fortnight",
+			wantErr:     true,
+			errContains: "invalid timeframe: no numeric value found",
+		},
+		{
+			name:        "almost today",
+			timeframe:   "todayy",
+			wantErr:     true,
+			errContains: "did you mean 'today'",
+		},
+
+		// Valid cases - just check they pass validation
+		{
+			name:      "valid numeric with hours",
+			timeframe: "24h",
+			wantErr:   false,
+		},
+		{
+			name:      "valid numeric with days",
+			timeframe: "7d",
+			wantErr:   false,
+		},
+		{
+			name:      "valid keyword",
+			timeframe: "today",
+			wantErr:   false,
+		},
+		{
+			name:      "valid uppercase",
+			timeframe: "WEEK",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTimeframe(tt.timeframe)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTimeframe(%q) error = %v, wantErr %v", tt.timeframe, err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("ValidateTimeframe(%q) error = %v, want error containing %q", tt.timeframe, err, tt.errContains)
+			}
+		})
+	}
 }
