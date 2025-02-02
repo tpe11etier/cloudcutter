@@ -157,43 +157,58 @@ func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
 		}
 	case tcell.KeyEnter:
 		row, _ := v.components.resultsTable.GetSelection()
-		if row > 0 && row <= len(v.state.data.displayedResults) {
-			entry := v.state.data.displayedResults[row-1]
-
-			v.showLoading("Fetching document...")
-
-			go func() {
-				defer v.hideLoading()
-
-				res, err := v.service.Client.Get(
-					entry.Index,
-					entry.ID,
-				)
-				if err != nil {
-					v.manager.App().QueueUpdateDraw(func() {
-						v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching document: %v", err))
-					})
-					return
-				}
-				defer res.Body.Close()
-
-				var fullDoc struct {
-					Source map[string]any `json:"_source"`
-				}
-				if err := json.NewDecoder(res.Body).Decode(&fullDoc); err != nil {
-					v.manager.App().QueueUpdateDraw(func() {
-						v.manager.UpdateStatusBar(fmt.Sprintf("Error decoding document: %v", err))
-					})
-					return
-				}
-
-				// Display full doc
-				entry.data = fullDoc.Source
-				v.manager.App().QueueUpdateDraw(func() {
-					v.showJSONModal(entry)
-				})
-			}()
+		if row <= 0 {
+			return nil
 		}
+
+		v.state.mu.RLock()
+		currentPage := v.state.pagination.currentPage
+		pageSize := v.state.pagination.pageSize
+		displayedResults := v.state.data.displayedResults
+		v.state.mu.RUnlock()
+
+		// Calculate the actual index in displayedResults
+		actualIndex := (currentPage-1)*pageSize + (row - 1)
+
+		if actualIndex >= len(displayedResults) {
+			return nil
+		}
+
+		entry := displayedResults[actualIndex]
+
+		v.showLoading("Fetching document...")
+
+		go func() {
+			defer v.hideLoading()
+
+			res, err := v.service.Client.Get(
+				entry.Index,
+				entry.ID,
+			)
+			if err != nil {
+				v.manager.App().QueueUpdateDraw(func() {
+					v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching document: %v", err))
+				})
+				return
+			}
+			defer res.Body.Close()
+
+			var fullDoc struct {
+				Source map[string]any `json:"_source"`
+			}
+			if err := json.NewDecoder(res.Body).Decode(&fullDoc); err != nil {
+				v.manager.App().QueueUpdateDraw(func() {
+					v.manager.UpdateStatusBar(fmt.Sprintf("Error decoding document: %v", err))
+				})
+				return
+			}
+
+			// Display full doc
+			entry.data = fullDoc.Source
+			v.manager.App().QueueUpdateDraw(func() {
+				v.showJSONModal(entry)
+			})
+		}()
 		return nil
 	}
 	return event

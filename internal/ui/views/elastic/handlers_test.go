@@ -3,6 +3,7 @@ package elastic
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +20,10 @@ import (
 func createTestView(t *testing.T) *View {
 	log := createTestLogger(t)
 	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log)
+
+	// Create field management components
+	fieldCache := NewFieldCache()
+	fieldState := NewFieldState(fieldCache)
 
 	view := &View{
 		manager: manager,
@@ -37,12 +42,13 @@ func createTestView(t *testing.T) *View {
 				fieldListFilter: "",
 			},
 			data: DataState{
-				activeFields:     make(map[string]bool),
-				filters:          []string{},
+				fieldCache: fieldCache,
+				fieldState: fieldState,
+
+				filters:       []string{},
+				currentFilter: "",
+
 				currentResults:   []*DocEntry{},
-				fieldOrder:       []string{},
-				originalFields:   []string{},
-				fieldMatches:     []string{},
 				filteredResults:  []*DocEntry{},
 				displayedResults: []*DocEntry{},
 				columnCache:      make(map[string][]string),
@@ -276,68 +282,170 @@ func TestHandleFieldList_NoPanicIfEmpty(t *testing.T) {
 
 }
 
-// TestHandleFieldList_ToggleSelection demonstrates toggling a field from fieldList to selectedList.
 func TestHandleFieldList_ToggleSelection(t *testing.T) {
 	view := createTestView(t)
 
-	// Add some mock fields to the fieldList
-	view.components.fieldList.AddItem("status", "A keyword field", rune(0), nil)
-	view.components.fieldList.AddItem("user", "Another field", rune(0), nil)
+	// Create a mock DocEntry with test fields
+	mockDoc := &DocEntry{
+		ID:    "test-id",
+		Index: "test-index",
+		Type:  "test-type",
+		data: map[string]any{
+			"status": "active",
+			"user":   "testuser",
+		},
+	}
 
-	// We must set the state fieldCache accordingly
+	// Set up field metadata
 	fieldCache := NewFieldCache()
 	fieldCache.Set("status", &FieldMetadata{Type: "keyword"})
 	fieldCache.Set("user", &FieldMetadata{Type: "keyword"})
 	view.state.data.fieldCache = fieldCache
 
-	// The first item in the list is "status" -> simulate selecting it
-	view.components.fieldList.SetCurrentItem(0) // index 0 => "status"
+	// Update field state with the mock document
+	view.state.data.fieldState.UpdateFromDocuments([]*DocEntry{mockDoc})
+
+	// Add discovered fields to the fieldList
+	discoveredFields := mockDoc.GetAvailableFields()
+	for _, field := range discoveredFields {
+		if !strings.HasPrefix(field, "_") { // Skip metadata fields for this test
+			view.components.fieldList.AddItem(field, "", rune(0), nil)
+		}
+	}
+
+	// Select "status" field
+	view.components.fieldList.SetCurrentItem(0)
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	view.handleFieldList(event)
 
-	view.state.mu.RLock()
-	active := view.state.data.activeFields["status"]
-	view.state.mu.RUnlock()
-
-	if !active {
-		t.Errorf("expected field 'status' to be active after toggling, but it's inactive")
+	if !view.state.data.fieldState.IsFieldSelected("status") {
+		t.Errorf("expected field 'status' to be selected after toggling, but it's not")
 	}
 
-	// Now check if it shows up in selectedList visually
+	// Verify UI state
 	if view.components.selectedList.GetItemCount() != 1 {
 		t.Errorf("expected 1 item in selectedList, found %d", view.components.selectedList.GetItemCount())
 	}
+
+	// Verify the selected field value can be retrieved
+	selectedText, _ := view.components.selectedList.GetItemText(0)
+	if selectedText != "status" {
+		t.Errorf("expected selected field to be 'status', got %s", selectedText)
+	}
 }
 
-// TestHandleSelectedList_ToggleBack tests that toggling a field from the selectedList
-// (i.e., removing from active fields) works.
 func TestHandleSelectedList_ToggleBack(t *testing.T) {
 	view := createTestView(t)
 
-	// make "status" active
-	view.state.mu.Lock()
-	view.state.data.activeFields["status"] = true
-	view.state.mu.Unlock()
+	// Create a mock DocEntry with test fields
+	mockDoc := &DocEntry{
+		ID:    "test-id",
+		Index: "test-index",
+		Type:  "test-type",
+		data: map[string]any{
+			"status": "active",
+		},
+	}
 
-	// Populate the selectedList
-	view.components.selectedList.AddItem("status", "", rune(0), nil)
+	// Set up field metadata
+	fieldCache := NewFieldCache()
+	fieldCache.Set("status", &FieldMetadata{Type: "keyword"})
+	view.state.data.fieldCache = fieldCache
 
-	// The first item in the selectedList is "status", select it
+	// Update field state with the mock document
+	view.state.data.fieldState.UpdateFromDocuments([]*DocEntry{mockDoc})
+
+	// Select the field programmatically
+	view.state.data.fieldState.SelectField("status")
+
+	// Rebuild UI
+	view.rebuildFieldList()
+
+	// Verify initial state
+	if !view.state.data.fieldState.IsFieldSelected("status") {
+		t.Fatalf("initial setup failed: 'status' should be selected")
+	}
+
+	// Toggle the field back
 	view.components.selectedList.SetCurrentItem(0)
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
 	view.handleSelectedList(event)
 
-	view.state.mu.RLock()
-	active := view.state.data.activeFields["status"]
-	view.state.mu.RUnlock()
-
-	if active {
-		t.Errorf("expected field 'status' to be deactivated, but it is still active")
+	// Verify field was unselected
+	if view.state.data.fieldState.IsFieldSelected("status") {
+		t.Errorf("expected field 'status' to be unselected, but it is still selected")
 	}
 
-	// should be removed from the selectedList
+	// Verify UI state
 	if view.components.selectedList.GetItemCount() != 0 {
 		t.Errorf("expected 0 items in selectedList, found %d", view.components.selectedList.GetItemCount())
+	}
+}
+
+func TestFieldState_ComplexDocument(t *testing.T) {
+	view := createTestView(t)
+
+	// Create a mock DocEntry with nested fields
+	mockDoc := &DocEntry{
+		ID:    "test-id",
+		Index: "test-index",
+		Type:  "test-type",
+		data: map[string]any{
+			"user": map[string]any{
+				"id":   "u123",
+				"name": "Test User",
+				"preferences": map[string]any{
+					"theme": "dark",
+				},
+			},
+			"metadata": map[string]any{
+				"tags": []any{"test", "example"},
+			},
+		},
+	}
+
+	// Set up field metadata
+	fieldCache := NewFieldCache()
+	for _, field := range mockDoc.GetAvailableFields() {
+		fieldCache.Set(field, &FieldMetadata{Type: "keyword"})
+	}
+	view.state.data.fieldCache = fieldCache
+
+	// Update field state
+	view.state.data.fieldState.UpdateFromDocuments([]*DocEntry{mockDoc})
+
+	// Get discovered fields
+	discoveredFields := view.state.data.fieldState.GetDiscoveredFields()
+
+	// Verify expected nested fields are discovered
+	expectedFields := []string{
+		"user.id",
+		"user.name",
+		"user.preferences.theme",
+		"metadata.tags",
+	}
+
+	for _, expected := range expectedFields {
+		found := false
+		for _, field := range discoveredFields {
+			if field == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected field %s not found in discovered fields", expected)
+		}
+	}
+
+	// Test selection of nested fields
+	for _, field := range expectedFields[:2] { // Select first two fields
+		view.state.data.fieldState.SelectField(field)
+	}
+
+	selectedFields := view.state.data.fieldState.GetOrderedSelectedFields()
+	if len(selectedFields) != 2 {
+		t.Errorf("expected 2 selected fields, got %d", len(selectedFields))
 	}
 }
 
