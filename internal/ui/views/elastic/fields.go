@@ -25,6 +25,28 @@ type FieldCache struct {
 	cache sync.Map
 }
 
+type FieldState struct {
+	// Fields discovered from documents
+	discoveredFields map[string]struct{}
+
+	// Fields that are selected for display
+	selectedFields map[string]struct{}
+
+	// Ordered list of selected fields (maintains display order)
+	fieldOrder []string
+
+	// Current filter being applied
+	currentFilter string
+
+	// Fields matching current filter
+	filteredFields []string
+
+	// Reference to field cache for metadata access
+	fieldCache *FieldCache
+
+	mu sync.RWMutex
+}
+
 func NewFieldCache() *FieldCache {
 	return &FieldCache{}
 }
@@ -60,10 +82,16 @@ func (v *View) resetFieldState() error {
 }
 
 func (v *View) loadFields() error {
-	query := map[string]interface{}{
+	// Initialize if needed
+	if v.state.data.fieldCache == nil {
+		v.state.data.fieldCache = NewFieldCache()
+		v.state.data.fieldState = NewFieldState(v.state.data.fieldCache)
+	}
+
+	query := map[string]any{
 		"size": 10,
-		"query": map[string]interface{}{
-			"match_all": map[string]interface{}{},
+		"query": map[string]any{
+			"match_all": map[string]any{},
 		},
 	}
 
@@ -77,16 +105,12 @@ func (v *View) loadFields() error {
 		return err
 	}
 
-	discoveredFields := make(map[string]struct{})
-	for _, entry := range entries {
-		fields := entry.GetAvailableFields()
-		for _, field := range fields {
-			discoveredFields[field] = struct{}{}
-		}
-	}
+	// Update field state with discovered fields
+	v.state.data.fieldState.UpdateFromDocuments(entries)
 
 	needMetadata := false
-	for field := range discoveredFields {
+	discoveredFields := v.state.data.fieldState.GetDiscoveredFields()
+	for _, field := range discoveredFields {
 		if _, ok := v.state.data.fieldCache.Get(field); !ok {
 			needMetadata = true
 			break
@@ -139,36 +163,8 @@ func (v *View) loadFields() error {
 		}
 	}
 
-	v.state.mu.Lock()
-	defer v.state.mu.Unlock()
-
-	allFields := make([]string, 0, len(discoveredFields))
-	for field := range discoveredFields {
-		allFields = append(allFields, field)
-	}
-	sort.Strings(allFields)
-
-	v.state.data.originalFields = allFields
-	v.state.data.fieldOrder = make([]string, len(allFields))
-	copy(v.state.data.fieldOrder, allFields)
-
-	if v.state.data.activeFields == nil {
-		v.state.data.activeFields = make(map[string]bool)
-	}
-
-	// Set _id as active by default if present
-	for _, field := range allFields {
-		if field == "_id" {
-			v.state.data.activeFields[field] = true
-			break
-		}
-	}
-
-	// Mark discovered fields as active in metadata
-	for field := range discoveredFields {
-		if meta, ok := v.state.data.fieldCache.Get(field); ok {
-			meta.Active = true
-		}
+	if !v.state.data.fieldState.IsFieldSelected("_id") {
+		v.state.data.fieldState.SelectField("_id")
 	}
 
 	v.manager.App().QueueUpdateDraw(func() {
@@ -183,55 +179,8 @@ func (v *View) updateFieldsFromResults(results []*DocEntry) {
 		return
 	}
 
-	newFields := make(map[string]struct{})
-	for _, entry := range results {
-		fields := entry.GetAvailableFields()
-		for _, field := range fields {
-			newFields[field] = struct{}{}
-		}
-	}
-
-	v.state.mu.Lock()
-	defer v.state.mu.Unlock()
-
-	if len(newFields) == len(v.state.data.originalFields) {
-		allMatch := true
-		for _, field := range v.state.data.originalFields {
-			if _, ok := newFields[field]; !ok {
-				allMatch = false
-				break
-			}
-		}
-		if allMatch {
-			return
-		}
-	}
-
-	fields := make([]string, 0, len(newFields))
-	for field := range newFields {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-
-	// Update state atomically
-	v.state.data.originalFields = fields
-	v.state.data.fieldOrder = make([]string, len(fields))
-	copy(v.state.data.fieldOrder, fields)
-
-	// Update field metadata
-	for field := range newFields {
-		if meta, ok := v.state.data.fieldCache.Get(field); ok {
-			meta.Active = true
-		}
-	}
-
-	newActiveFields := make(map[string]bool)
-	for field := range v.state.data.activeFields {
-		if _, ok := newFields[field]; ok {
-			newActiveFields[field] = true
-		}
-	}
-	v.state.data.activeFields = newActiveFields
+	// Update the field state with new document fields
+	v.state.data.fieldState.UpdateFromDocuments(results)
 
 	v.manager.App().QueueUpdateDraw(func() {
 		v.rebuildFieldList()
@@ -251,19 +200,26 @@ func (v *View) rebuildFieldList() {
 	v.components.fieldList.Clear()
 	v.components.selectedList.Clear()
 
-	// Build selected fields list
-	for _, field := range v.state.data.fieldOrder {
-		if v.state.data.activeFields[field] {
-			fieldName := field
-			v.components.selectedList.AddItem(field, "", 0, func() {
-				v.toggleField(fieldName)
-			})
-		}
+	// Get all discovered and selected fields
+	discoveredFields := v.state.data.fieldState.GetDiscoveredFields()
+	selectedFields := v.state.data.fieldState.GetOrderedSelectedFields()
+
+	// Build selected fields list maintaining order
+	for _, field := range selectedFields {
+		fieldName := field
+		v.components.selectedList.AddItem(field, "", 0, func() {
+			v.toggleField(fieldName)
+		})
 	}
 
-	// Build available fields list
-	for _, field := range v.state.data.fieldOrder {
-		if !v.state.data.activeFields[field] {
+	// Build available fields list (excluding selected fields)
+	selectedMap := make(map[string]struct{})
+	for _, field := range selectedFields {
+		selectedMap[field] = struct{}{}
+	}
+
+	for _, field := range discoveredFields {
+		if _, isSelected := selectedMap[field]; !isSelected {
 			fieldName := field
 			v.components.fieldList.AddItem(field, "", 0, func() {
 				v.toggleField(fieldName)
@@ -273,141 +229,55 @@ func (v *View) rebuildFieldList() {
 }
 
 func (v *View) toggleField(field string) {
-	v.state.mu.Lock()
-	isActive := v.state.data.activeFields[field]
-	v.state.data.activeFields[field] = !isActive
-	v.state.mu.Unlock()
-
-	if !isActive {
-		v.components.selectedList.AddItem(field, "", 0, func() {
-			v.toggleField(field)
-		})
-
-		for i := 0; i < v.components.fieldList.GetItemCount(); i++ {
-			if text, _ := v.components.fieldList.GetItemText(i); text == field {
-				v.components.fieldList.RemoveItem(i)
-				break
-			}
-		}
+	if v.state.data.fieldState.IsFieldSelected(field) {
+		v.state.data.fieldState.UnselectField(field)
 	} else {
-		for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
-			if text, _ := v.components.selectedList.GetItemText(i); text == field {
-				v.components.selectedList.RemoveItem(i)
-				break
-			}
-		}
-		v.components.fieldList.AddItem(field, "", 0, func() {
-			v.toggleField(field)
-		})
+		v.state.data.fieldState.SelectField(field)
 	}
 
-	// Refresh results to show new column order
+	v.rebuildFieldList()
+
 	v.refreshResults()
 }
 
 func (v *View) filterFieldList(filter string) {
-	v.manager.Logger().Debug("Filtering field list",
-		"filter", filter,
-		"originalFieldsCount", len(v.state.data.originalFields),
-		"activeFieldsCount", len(v.state.data.activeFields))
+	// Get filtered fields from FieldState
+	filteredFields := v.state.data.fieldState.ApplyFilter(filter)
 
-	v.state.data.currentFilter = filter
 	v.components.fieldList.Clear()
 
-	// Ensure we have fields to work with
-	if len(v.state.data.originalFields) == 0 {
-		v.manager.Logger().Warn("No original fields available")
-		return
-	}
-
-	fieldsToShow := v.state.data.originalFields
-	if filter != "" {
-		// When filtering, only show fields that match the filter
-		filter = strings.ToLower(filter)
-		matchedFields := make([]string, 0)
-
-		for _, field := range v.state.data.originalFields {
-			if strings.Contains(strings.ToLower(field), filter) {
-				matchedFields = append(matchedFields, field)
-			}
-		}
-
-		v.state.data.fieldMatches = matchedFields
-		fieldsToShow = matchedFields
-	} else {
-		v.state.data.fieldMatches = nil
-		// When not filtering, show all fields
-		fieldsToShow = v.state.data.originalFields
-	}
-
-	// Only show fields that aren't currently active
-	for _, field := range fieldsToShow {
-		if !v.state.data.activeFields[field] {
-			fieldName := field // Capture for closure
-			v.components.fieldList.AddItem(field, "", 0, func() {
-				v.toggleField(fieldName)
-			})
-		}
+	for _, field := range filteredFields {
+		fieldName := field
+		v.components.fieldList.AddItem(field, "", 0, func() {
+			v.toggleField(fieldName)
+		})
 	}
 
 	if filter != "" {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)",
-			filter, v.components.fieldList.GetItemCount()))
+			filter, len(filteredFields)))
 	} else {
 		v.manager.UpdateStatusBar("Showing all available fields")
 	}
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {
-	// Get current list of fields in selected list
-	var selectedFields []string
-	for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
-		text, _ := v.components.selectedList.GetItemText(i)
-		selectedFields = append(selectedFields, text)
-	}
+	if moved := v.state.data.fieldState.MoveField(field, moveUp); moved {
+		v.rebuildFieldList()
 
-	// Find current position
-	currentPos := -1
-	for i, f := range selectedFields {
-		if f == field {
-			currentPos = i
-			break
+		selectedFields := v.state.data.fieldState.GetOrderedSelectedFields()
+		newPos := 0
+		for i, f := range selectedFields {
+			if f == field {
+				newPos = i
+				break
+			}
 		}
+
+		v.components.selectedList.SetCurrentItem(newPos)
+
+		v.displayCurrentPage()
 	}
-	if currentPos == -1 {
-		return
-	}
-
-	// Calculate new position
-	newPos := currentPos
-	if moveUp && currentPos > 0 {
-		newPos = currentPos - 1
-	} else if !moveUp && currentPos < len(selectedFields)-1 {
-		newPos = currentPos + 1
-	}
-
-	// If no movement needed, return early
-	if newPos == currentPos {
-		return
-	}
-
-	// Do the swap
-	selectedFields[currentPos], selectedFields[newPos] = selectedFields[newPos], selectedFields[currentPos]
-
-	// Rebuild just the selected list
-	v.components.selectedList.Clear()
-	for _, f := range selectedFields {
-		field := f // Capture for closure
-		v.components.selectedList.AddItem(field, "", 0, func() {
-			v.toggleField(field)
-		})
-	}
-
-	// Set focus back to the moved item
-	v.components.selectedList.SetCurrentItem(newPos)
-
-	// Refresh the results table since order changed
-	v.displayCurrentPage()
 }
 
 func (v *View) initFieldsSync() error {
@@ -471,11 +341,196 @@ func getIndices(v *View) []help.Command {
 }
 
 func (v *View) getActiveHeaders() []string {
-	// get order from selected list
-	var headers []string
-	for i := 0; i < v.components.selectedList.GetItemCount(); i++ {
-		text, _ := v.components.selectedList.GetItemText(i)
-		headers = append(headers, text)
+	return v.state.data.fieldState.GetOrderedSelectedFields()
+}
+
+func NewFieldState(fieldCache *FieldCache) *FieldState {
+	return &FieldState{
+		discoveredFields: make(map[string]struct{}),
+		selectedFields:   make(map[string]struct{}),
+		fieldOrder:       make([]string, 0),
+		fieldCache:       fieldCache,
 	}
-	return headers
+}
+
+func (fs *FieldState) Reset() {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	fs.discoveredFields = make(map[string]struct{})
+	fs.selectedFields = make(map[string]struct{})
+	fs.fieldOrder = make([]string, 0)
+	fs.currentFilter = ""
+	fs.filteredFields = nil
+}
+
+// UpdateFromDocuments updates discovered fields from document results
+func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	newFields := make(map[string]struct{})
+	for _, doc := range docs {
+		fields := doc.GetAvailableFields()
+		for _, field := range fields {
+			newFields[field] = struct{}{}
+		}
+	}
+
+	// Check if fields have changed
+	if len(newFields) == len(fs.discoveredFields) {
+		allMatch := true
+		for field := range fs.discoveredFields {
+			if _, ok := newFields[field]; !ok {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return
+		}
+	}
+
+	fs.discoveredFields = newFields
+
+	// Clean up selected fields that no longer exist
+	for field := range fs.selectedFields {
+		if _, ok := newFields[field]; !ok {
+			delete(fs.selectedFields, field)
+			fs.fieldOrder = removeString(fs.fieldOrder, field)
+		}
+	}
+}
+
+// GetDiscoveredFields returns a sorted list of all discovered fields
+func (fs *FieldState) GetDiscoveredFields() []string {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	fields := make([]string, 0, len(fs.discoveredFields))
+	for field := range fs.discoveredFields {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// IsFieldSelected checks if a field is currently selected
+func (fs *FieldState) IsFieldSelected(field string) bool {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	_, ok := fs.selectedFields[field]
+	return ok
+}
+
+// SelectField adds a field to selected fields and maintains order
+func (fs *FieldState) SelectField(field string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if _, exists := fs.discoveredFields[field]; !exists {
+		return
+	}
+
+	if _, alreadySelected := fs.selectedFields[field]; !alreadySelected {
+		fs.selectedFields[field] = struct{}{}
+		fs.fieldOrder = append(fs.fieldOrder, field)
+	}
+}
+
+// UnselectField removes a field from selected fields
+func (fs *FieldState) UnselectField(field string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	delete(fs.selectedFields, field)
+	fs.fieldOrder = removeString(fs.fieldOrder, field)
+}
+
+// MoveField changes the position of a field in the order
+func (fs *FieldState) MoveField(field string, moveUp bool) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	currentPos := -1
+	for i, f := range fs.fieldOrder {
+		if f == field {
+			currentPos = i
+			break
+		}
+	}
+
+	if currentPos == -1 {
+		return false
+	}
+
+	newPos := currentPos
+	if moveUp && currentPos > 0 {
+		newPos = currentPos - 1
+	} else if !moveUp && currentPos < len(fs.fieldOrder)-1 {
+		newPos = currentPos + 1
+	}
+
+	if newPos == currentPos {
+		return false
+	}
+
+	// Perform the swap
+	fs.fieldOrder[currentPos], fs.fieldOrder[newPos] = fs.fieldOrder[newPos], fs.fieldOrder[currentPos]
+	return true
+}
+
+// GetOrderedSelectedFields returns selected fields in display order
+func (fs *FieldState) GetOrderedSelectedFields() []string {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	result := make([]string, len(fs.fieldOrder))
+	copy(result, fs.fieldOrder)
+	return result
+}
+
+// ApplyFilter updates filtered fields based on search string
+func (fs *FieldState) ApplyFilter(filter string) []string {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	fs.currentFilter = filter
+
+	if filter == "" {
+		fs.filteredFields = nil
+		discovered := make([]string, 0, len(fs.discoveredFields))
+		for field := range fs.discoveredFields {
+			if _, isSelected := fs.selectedFields[field]; !isSelected {
+				discovered = append(discovered, field)
+			}
+		}
+		sort.Strings(discovered)
+		return discovered
+	}
+
+	filter = strings.ToLower(filter)
+	var matched []string
+
+	for field := range fs.discoveredFields {
+		if _, isSelected := fs.selectedFields[field]; !isSelected {
+			if strings.Contains(strings.ToLower(field), filter) {
+				matched = append(matched, field)
+			}
+		}
+	}
+
+	sort.Strings(matched)
+	fs.filteredFields = matched
+	return matched
+}
+
+func removeString(slice []string, s string) []string {
+	result := make([]string, 0, len(slice))
+	for _, item := range slice {
+		if item != s {
+			result = append(result, item)
+		}
+	}
+	return result
 }

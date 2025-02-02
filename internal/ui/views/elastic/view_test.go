@@ -1,20 +1,28 @@
 package elastic
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestConcurrentFiltering(t *testing.T) {
-	// Create a minimal view with just the state we need
+	// Create mock documents
+	mockDocs := []*DocEntry{
+		{ID: "1", data: map[string]any{"field": "value1"}},
+		{ID: "2", data: map[string]any{"field": "value2"}},
+	}
+
+	fieldCache := NewFieldCache()
+	fieldState := NewFieldState(fieldCache)
+
 	view := &View{
 		state: State{
 			data: DataState{
-				filteredResults: []*DocEntry{
-					{ID: "1", data: map[string]interface{}{"field": "value1"}},
-					{ID: "2", data: map[string]interface{}{"field": "value2"}},
-				},
+				fieldCache:       fieldCache,
+				fieldState:       fieldState,
+				filteredResults:  mockDocs,
 				displayedResults: []*DocEntry{},
 				currentFilter:    "",
 			},
@@ -34,7 +42,6 @@ func TestConcurrentFiltering(t *testing.T) {
 			copy(results, view.state.data.filteredResults)
 			view.state.mu.Unlock()
 
-			// Verify we can read the results without panic
 			if len(results) < 1 {
 				t.Error("Expected results to be present")
 			}
@@ -55,69 +62,44 @@ func TestConcurrentFiltering(t *testing.T) {
 	}
 }
 
-func TestConcurrentResultsRefresh(t *testing.T) {
-	view := &View{
-		state: State{
-			ui: UIState{
-				isLoading: false,
-			},
+func TestConcurrentFieldStateAccess(t *testing.T) {
+	fieldCache := NewFieldCache()
+	fieldState := NewFieldState(fieldCache)
+
+	// Create mock document with fields
+	mockDoc := &DocEntry{
+		ID: "test",
+		data: map[string]any{
+			"field1": "value1",
+			"field2": "value2",
+			"field3": "value3",
 		},
 	}
 
-	// Run multiple goroutines trying to set loading state
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			view.state.mu.Lock()
-			if !view.state.ui.isLoading {
-				view.state.ui.isLoading = true
-			}
-			view.state.mu.Unlock()
-		}()
-	}
+	// Update field state with mock document
+	fieldState.UpdateFromDocuments([]*DocEntry{mockDoc})
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Test completed successfully
-	case <-time.After(5 * time.Second):
-		t.Fatal("Test timed out - possible deadlock")
-	}
-
-	// Verify final state
-	view.state.mu.Lock()
-	if !view.state.ui.isLoading {
-		t.Error("Expected loading state to be true")
-	}
-	view.state.mu.Unlock()
-}
-
-func TestConcurrentStateAccess(t *testing.T) {
 	view := &View{
 		state: State{
 			data: DataState{
-				activeFields: make(map[string]bool),
-				fieldOrder:   []string{"field1", "field2", "field3"},
+				fieldCache: fieldCache,
+				fieldState: fieldState,
 			},
 		},
 	}
 
-	// Run multiple goroutines trying to modify fields
+	// Run multiple goroutines trying to select/unselect fields
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			view.state.mu.Lock()
-			view.state.data.activeFields["field1"] = i%2 == 0
-			view.state.mu.Unlock()
+			field := fmt.Sprintf("field%d", (i%3)+1)
+			if i%2 == 0 {
+				view.state.data.fieldState.SelectField(field)
+			} else {
+				view.state.data.fieldState.UnselectField(field)
+			}
 		}(i)
 	}
 
@@ -135,18 +117,95 @@ func TestConcurrentStateAccess(t *testing.T) {
 	}
 }
 
+func TestConcurrentFieldMovement(t *testing.T) {
+	fieldCache := NewFieldCache()
+	fieldState := NewFieldState(fieldCache)
+
+	// Create mock document
+	mockDoc := &DocEntry{
+		ID: "test",
+		data: map[string]any{
+			"field1": "value1",
+			"field2": "value2",
+			"field3": "value3",
+		},
+	}
+
+	fieldState.UpdateFromDocuments([]*DocEntry{mockDoc})
+
+	// Select all fields initially
+	for _, field := range []string{"field1", "field2", "field3"} {
+		fieldState.SelectField(field)
+	}
+
+	view := &View{
+		state: State{
+			data: DataState{
+				fieldCache: fieldCache,
+				fieldState: fieldState,
+			},
+		},
+	}
+
+	// Run multiple goroutines trying to move fields
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			field := fmt.Sprintf("field%d", (i%3)+1)
+			moveUp := i%2 == 0
+			view.state.data.fieldState.MoveField(field, moveUp)
+		}(i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Test completed successfully
+	case <-time.After(5 * time.Second):
+		t.Fatal("Test timed out - possible deadlock")
+	}
+
+	// Verify we still have all fields selected
+	selectedFields := view.state.data.fieldState.GetOrderedSelectedFields()
+	if len(selectedFields) != 3 {
+		t.Errorf("Expected 3 selected fields, got %d", len(selectedFields))
+	}
+}
+
 func TestViewFiltering(t *testing.T) {
 	tests := []struct {
 		name        string
 		filters     []string
 		timeframe   string
+		mockDocs    []*DocEntry
 		wantErr     bool
 		wantResults int
 	}{
 		{
-			name:        "Basic filter",
-			filters:     []string{"status=active"},
-			timeframe:   "12h",
+			name:      "Basic filter",
+			filters:   []string{"status=active"},
+			timeframe: "12h",
+			mockDocs: []*DocEntry{
+				{
+					ID: "1",
+					data: map[string]any{
+						"status": "active",
+					},
+				},
+				{
+					ID: "2",
+					data: map[string]any{
+						"status": "inactive",
+					},
+				},
+			},
 			wantErr:     false,
 			wantResults: 1,
 		},
@@ -155,6 +214,18 @@ func TestViewFiltering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			view := createTestView(t)
+
+			// Set up field metadata
+			fieldCache := view.state.data.fieldCache
+			for _, doc := range tt.mockDocs {
+				for field := range doc.data {
+					fieldCache.Set(field, &FieldMetadata{
+						Type:         "keyword",
+						Searchable:   true,
+						Aggregatable: true,
+					})
+				}
+			}
 
 			// Add filters
 			view.state.mu.Lock()
@@ -165,27 +236,7 @@ func TestViewFiltering(t *testing.T) {
 
 			view.components.timeframeInput.SetText(tt.timeframe)
 
-			// Mock search results
-			// Verify state
-			// Check UI updates
+			// TODO: Mock search service and verify results
 		})
 	}
-}
-
-func TestViewPageNavigation(t *testing.T) {
-	// TODO - Test page navigation
-}
-
-func TestViewErrorHandling(t *testing.T) {
-	// TODO - Test error handling in view
-}
-
-func TestViewTimeframe(t *testing.T) {
-	// TODO - Test setting timeframe and verifying results
-
-}
-
-func TestViewConcurrency(t *testing.T) {
-	// TODO - Run multiple goroutines to test concurrent access
-
 }

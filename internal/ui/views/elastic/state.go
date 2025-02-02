@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"sort"
 	"sync"
 )
 
@@ -31,17 +30,16 @@ type UIState struct {
 }
 
 type DataState struct {
-	activeFields     map[string]bool
-	filters          []string
+	fieldCache *FieldCache
+	fieldState *FieldState
+
+	filters       []string
+	currentFilter string
+
 	currentResults   []*DocEntry
-	fieldOrder       []string
-	originalFields   []string
-	fieldMatches     []string
 	filteredResults  []*DocEntry
 	displayedResults []*DocEntry
 	columnCache      map[string][]string
-	currentFilter    string
-	fieldCache       *FieldCache
 }
 
 type SearchState struct {
@@ -61,28 +59,19 @@ type MiscState struct {
 }
 
 func (d *DataState) ResetFields() {
-	d.originalFields = nil
-	d.fieldOrder = nil
-	d.activeFields = make(map[string]bool)
+	d.fieldCache = NewFieldCache()
+	d.fieldState = NewFieldState(d.fieldCache)
 	d.columnCache = make(map[string][]string)
 }
 
 func (d *DataState) IsFieldActive(field string) bool {
-	return d.activeFields[field]
+	return d.fieldState.IsFieldSelected(field)
 }
 
 func (d *DataState) SetFieldActive(field string, active bool) {
-	d.activeFields[field] = active
-}
-
-func (d *DataState) UpdateFieldsFromSet(newFields map[string]struct{}) {
-	fields := make([]string, 0, len(newFields))
-	for field := range newFields {
-		fields = append(fields, field)
+	if active {
+		d.fieldState.SelectField(field)
+	} else {
+		d.fieldState.UnselectField(field)
 	}
-	sort.Strings(fields)
-
-	d.originalFields = fields
-	d.fieldOrder = make([]string, len(fields))
-	copy(d.fieldOrder, fields)
 }

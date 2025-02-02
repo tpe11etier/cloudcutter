@@ -36,6 +36,9 @@ type viewComponents struct {
 }
 
 func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex string) (*View, error) {
+	fieldCache := NewFieldCache()
+	fieldState := NewFieldState(fieldCache)
+
 	v := &View{
 		manager: manager,
 		service: esClient,
@@ -54,16 +57,16 @@ func NewView(manager *manager.Manager, esClient *elastic.Service, defaultIndex s
 				fieldListFilter: "",
 			},
 			data: DataState{
-				activeFields:     make(map[string]bool),
-				filters:          []string{},
+				fieldCache: fieldCache,
+				fieldState: fieldState,
+
+				filters:       []string{},
+				currentFilter: "",
+
 				currentResults:   []*DocEntry{},
-				fieldOrder:       []string{},
-				originalFields:   []string{},
-				fieldMatches:     []string{},
 				filteredResults:  []*DocEntry{},
 				displayedResults: []*DocEntry{},
 				columnCache:      make(map[string][]string),
-				fieldCache:       NewFieldCache(),
 			},
 			search: SearchState{
 				currentIndex:    defaultIndex,
@@ -205,10 +208,9 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 	}
 
 	v.state.mu.Lock()
+	// Reset field management
 	v.state.data.fieldCache = NewFieldCache()
-	v.state.data.originalFields = nil
-	v.state.data.fieldOrder = nil
-	v.state.data.activeFields = make(map[string]bool)
+	v.state.data.fieldState = NewFieldState(v.state.data.fieldCache)
 	v.state.mu.Unlock()
 
 	v.manager.App().QueueUpdateDraw(func() {
