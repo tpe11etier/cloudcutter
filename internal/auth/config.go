@@ -6,36 +6,42 @@ import (
 	"path/filepath"
 )
 
-type Environment struct {
+// OpalConfig represents the configuration for Opal
+type OpalConfig struct {
+	Environments map[string]OpalEnvironment `json:"environments"`
+}
+
+// OpalEnvironment represents an Opal environment configuration
+type OpalEnvironment struct {
 	RoleID      string   `json:"roleId"`
 	ProfileTags []string `json:"profileTags"`
 }
 
-type OpalConfig struct {
-	Environments map[string]Environment `json:"environments"`
-}
-
-// DefaultOpalConfig returns the built-in configuration
+// DefaultOpalConfig returns the default Opal configuration
 func DefaultOpalConfig() OpalConfig {
+	// Default role IDs - obfuscated for security
+	// These values will be overridden in production via environment variables
+	devRoleID := "********-****-****-****-************"  // Obfuscated ID
+	prodRoleID := "********-****-****-****-************" // Obfuscated ID
+
+	// Override with environment variables if set
+	if envDevRoleID := os.Getenv("OPAL_DEV_ROLE_ID"); envDevRoleID != "" {
+		devRoleID = envDevRoleID
+	}
+
+	if envProdRoleID := os.Getenv("OPAL_PROD_ROLE_ID"); envProdRoleID != "" {
+		prodRoleID = envProdRoleID
+	}
+
 	return OpalConfig{
-		Environments: map[string]Environment{
+		Environments: map[string]OpalEnvironment{
 			"dev": {
-				RoleID: getEnvOrDefault("OPAL_DEV_ROLE_ID", "492ce125-9c7a-435e-b550-d4ccc259133e"),
-				ProfileTags: []string{
-					"dev",
-					"development",
-					"opal_dev",
-					"opal-dev",
-				},
+				RoleID:      devRoleID,
+				ProfileTags: []string{"dev", "development", "opal_dev", "opal-dev"},
 			},
 			"prod": {
-				RoleID: getEnvOrDefault("OPAL_PROD_ROLE_ID", "fca565bc-1965-40b8-88fd-dd40b41e6770"),
-				ProfileTags: []string{
-					"prod",
-					"production",
-					"opal_prod",
-					"opal-prod",
-				},
+				RoleID:      prodRoleID,
+				ProfileTags: []string{"prod", "production", "opal_prod", "opal-prod"},
 			},
 		},
 	}

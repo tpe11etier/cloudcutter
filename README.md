@@ -26,6 +26,10 @@ A terminal-based UI application for interacting with and managing cloud services
 - **Command Mode**
     - Execute quick navigation and commands
 
+## Screenshots
+
+![CloudCutter](./screenshots/screenshot.png)
+
 ## Authentication Setup
 
 ### Prerequisites
@@ -54,8 +58,8 @@ CloudCutter supports flexible profile mapping for Opal authentication. You can c
 
 1. **Environment Variables**:
 ```bash
-export OPAL_DEV_ROLE_ID=492ce125-9c7a-435e-b550-d4ccc259133e
-export OPAL_PROD_ROLE_ID=fca565bc-1965-40b8-88fd-dd40b41e6770
+export OPAL_DEV_ROLE_ID=********-****-****-****-************
+export OPAL_PROD_ROLE_ID=********-****-****-****-************
 ```
 
 2. **Configuration File** (Optional):
@@ -64,11 +68,11 @@ export OPAL_PROD_ROLE_ID=fca565bc-1965-40b8-88fd-dd40b41e6770
 {
     "environments": {
         "dev": {
-            "roleId": "492ce125-9c7a-435e-b550-d4ccc259133e",
+            "roleId": "********-****-****-****-************",
             "profileTags": ["dev", "development", "opal_dev"]
         },
         "prod": {
-            "roleId": "fca565bc-1965-40b8-88fd-dd40b41e6770",
+            "roleId": "********-****-****-****-************",
             "profileTags": ["prod", "production", "opal_prod"]
         }
     }
