@@ -28,7 +28,7 @@ A terminal-based UI application for interacting with and managing cloud services
 
 ## Screenshots
 
-![CloudCutter](./screenshots/screenshot.png)
+![CloudCutter](./screenshots/screenshot.jpg)
 
 ## Authentication Setup
 
