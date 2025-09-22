@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -18,12 +20,12 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"strings"
 )
 
 const (
 	ViewDynamoDB   = "dynamodb"
 	ViewElastic    = "elastic"
+	ViewVault      = "vault"
 	ModalCmdPrompt = "modalPrompt"
 	ModalJSON      = "modalJSON"
 )
@@ -125,7 +127,7 @@ func (vm *Manager) setupPrompts() {
 		if input == "" {
 			return nil
 		}
-		commands := []string{"profile", "region", "dynamodb", "elastic", "help", "exit"}
+		commands := []string{"profile", "region", "dynamodb", "elastic", "vault", "help", "exit"}
 		var matches []string
 		for _, cmd := range commands {
 			if strings.HasPrefix(cmd, input) {
@@ -190,6 +192,7 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 		"region":   vm.showRegionSelector,
 		"dynamodb": func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewDynamoDB) },
 		"elastic":  func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewElastic) },
+		"vault":   func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewVault) },
 		"help": func() (tview.Primitive, error) {
 			vm.statusBar.SetText("Help: List of available commands...")
 			return nil, nil
@@ -434,6 +437,7 @@ func (vm *Manager) SwitchToView(name string) error {
 		// View already exists; switch directly
 		vm.logger.Debug("Switching to existing view", "view", name)
 		vm.setActiveView(view)
+		vm.hideLoading()
 	} else if constructor, exists := vm.lazyViews[name]; exists {
 		// Lazy view; construct it
 		vm.logger.Debug("Initializing lazy view", "view", name)
@@ -442,6 +446,7 @@ func (vm *Manager) SwitchToView(name string) error {
 			vm.App().QueueUpdateDraw(func() {
 				if err != nil {
 					vm.logger.Error("Failed to initialize lazy view", "view", name, "error", err)
+					vm.statusBar.SetText(fmt.Sprintf("Error initializing %s view: %s", name, err))
 					vm.hideLoading()
 					return
 				}

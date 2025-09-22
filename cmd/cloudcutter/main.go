@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"log"
-	"os"
-	"strings"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services"
@@ -18,6 +19,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
 	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
+	vaultView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/vault"
 )
 
 var (
@@ -88,6 +90,21 @@ func runApplication() {
 			return nil, fmt.Errorf("failed to create elastic view: %w", err)
 		}
 		return elasticViewInstance, nil
+	})
+	viewManager.RegisterLazyView(manager.ViewVault, func() (views.View, error) {
+		if err := services.InitializeVault(); err != nil {
+			return nil, err
+		}
+		// Default Vault configuration - these could be made configurable
+		vaultAddr := os.Getenv("VAULT_ADDR")
+		if vaultAddr == "" {
+			vaultAddr = "http://localhost:8200"
+		}
+		vaultToken := os.Getenv("VAULT_TOKEN")
+		if vaultToken == "" {
+			return nil, fmt.Errorf("VAULT_TOKEN environment variable not set. Please set VAULT_TOKEN to your Vault authentication token")
+		}
+		return vaultView.NewView(viewManager, services.Vault, vaultAddr, vaultToken), nil
 	})
 
 	if err := viewManager.Run(); err != nil {
