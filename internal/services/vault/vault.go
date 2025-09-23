@@ -125,10 +125,6 @@ func (s *Service) ListSecrets(ctx context.Context, addr, token, path string) ([]
 	
 	url := fmt.Sprintf("%s/v1/%s/metadata/%s", addr, mount, subPath)
 	
-	// Debug logging
-	fmt.Printf("DEBUG ListSecrets: path=%s, cleanPath=%s, mount=%s, subPath=%s, url=%s\n", 
-		path, cleanPath, mount, subPath, url)
-	
 	req, err := http.NewRequestWithContext(ctx, "LIST", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -144,8 +140,7 @@ func (s *Service) ListSecrets(ctx context.Context, addr, token, path string) ([]
 	
 	if resp.StatusCode != http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
-		fmt.Printf("DEBUG ListSecrets: HTTP %d, Response: %s\n", resp.StatusCode, string(body))
-		return nil, fmt.Errorf("vault API error: %s", string(body))
+		return nil, fmt.Errorf("vault API error (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 	
 	body, err := ioutil.ReadAll(resp.Body)

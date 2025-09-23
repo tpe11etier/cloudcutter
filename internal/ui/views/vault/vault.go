@@ -25,6 +25,7 @@ func GetVaultHealth(addr string) (*VaultHealth, error) {
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
+
 	if err != nil {
 		return nil, err
 	}

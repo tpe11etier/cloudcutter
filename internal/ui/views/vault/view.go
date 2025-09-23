@@ -23,17 +23,17 @@ import (
 var _ views.Reinitializer = (*View)(nil)
 
 type View struct {
-	name         string
-	content      *tview.Flex
-	manager      *manager.Manager
-	service      vault.Interface
-	leftPanel    *tview.List
-	dataTable    *tview.Table
-	rightPanel   *tview.Flex
-	detailsTable *tview.Table
-	headerTable  *tview.Table
-	filterPrompt *components.Prompt
-	layout       tview.Primitive
+	name          string
+	content       *tview.Flex
+	manager       *manager.Manager
+	service       vault.Interface
+	leftPanel     *tview.List
+	dataTable     *tview.Table
+	rightPanel    *tview.Flex
+	detailsTable  *tview.Table
+	breadcrumbBar *tview.Table
+	filterPrompt  *components.Prompt
+	layout        tview.Primitive
 
 	state viewState
 	ctx   context.Context
@@ -44,7 +44,7 @@ type View struct {
 type viewState struct {
 	isLoading         bool
 	mountsCache       map[string]*vault.Mount
-	originalSecrets  []*vault.Secret
+	originalSecrets   []*vault.Secret
 	filteredSecrets   []*vault.Secret
 	leftPanelFilter   string
 	dataPanelFilter   string
@@ -57,8 +57,10 @@ type viewState struct {
 	spinner           *spinner.Spinner
 	vaultAddr         string
 	vaultToken        string
-	currentViewType   string // "overview", "secret", "metadata"
+	currentViewType   string // "overview", "secrets", "metadata", "paths", "history"
 	currentSecret     *vault.Secret
+	currentPath       string // Current navigation path
+	breadcrumbVisible bool   // Whether to show breadcrumb navigation
 }
 
 func NewView(manager *manager.Manager, vaultService vault.Interface, addr, token string) *View {
@@ -112,13 +114,9 @@ func (v *View) fetchMounts() {
 
 	for mountPath, mount := range mounts {
 		v.state.mountsCache[mountPath] = mount
-		
-		// Create enhanced description with mount type and warnings
-		description := v.getMountDescription(mountPath, mount)
-		v.leftPanel.AddItem(mountPath, description, 0, nil)
+		v.leftPanel.AddItem(mountPath, "", 0, nil)
 	}
 
-	v.manager.UpdateStatusBar("Select a mount to view secrets or press Enter to view secrets")
 }
 
 func (v *View) fetchMountDetails(mountPath string) {
@@ -225,7 +223,7 @@ func (v *View) initializeMounts() {
 func (v *View) setupLayout() {
 	// Create the main layout with left panel and right panel
 	v.content = tview.NewFlex().SetDirection(tview.FlexColumn)
-	
+
 	// Left panel for mounts
 	v.leftPanel = tview.NewList()
 	v.leftPanel.SetBorder(true).
@@ -233,30 +231,32 @@ func (v *View) setupLayout() {
 		SetTitleAlign(tview.AlignCenter).
 		SetTitleColor(tcell.ColorMediumTurquoise).
 		SetBorderColor(tcell.ColorMediumTurquoise)
-	
+
 	v.leftPanel.SetSelectedTextColor(tcell.ColorLightYellow).
 		SetSelectedBackgroundColor(tcell.ColorDarkCyan)
-	
+	v.leftPanel.ShowSecondaryText(false)
+
 	v.leftPanel.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		v.fetchMountDetails(mainText)
 	})
-	
+
 	v.leftPanel.SetSelectedFunc(func(index int, mainText, secondaryText string, shortcut rune) {
 		v.showMountSecrets(mainText)
 	})
-	
+
 	// Right panel container
 	v.rightPanel = tview.NewFlex().SetDirection(tview.FlexRow)
-	
+
 	// Top right panel for directory contents
 	v.dataTable = tview.NewTable()
 	v.dataTable.SetBorder(true).
-		SetTitle(" Contents ").
+		SetTitle(" Contents: ↑↓ Navigate | y Copy ").
 		SetTitleAlign(tview.AlignCenter).
 		SetTitleColor(tcell.ColorMediumTurquoise).
-		SetBorderColor(tcell.ColorBeige)
-	v.dataTable.SetSelectable(true, false)
-	
+		SetBorderColor(tcell.ColorMediumTurquoise)
+	v.dataTable.SetSelectable(true, false).
+		SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorLightYellow).Background(tcell.ColorDarkCyan))
+
 	// Bottom right panel for secret details (initially hidden)
 	v.detailsTable = tview.NewTable()
 	v.detailsTable.SetBorder(true).
@@ -265,26 +265,26 @@ func (v *View) setupLayout() {
 		SetTitleColor(tcell.ColorMediumTurquoise).
 		SetBorderColor(tcell.ColorBeige)
 	v.detailsTable.SetSelectable(true, false)
-	
-	// Header panel for tabs (initially hidden)
-	v.headerTable = tview.NewTable()
-	v.headerTable.SetBorder(true).
-		SetTitle(" View ").
+
+	// Create breadcrumb navigation bar (initially hidden)
+	v.breadcrumbBar = tview.NewTable()
+	v.breadcrumbBar.SetBorder(true).
+		SetTitle(" Navigation: ← → Navigate views ").
 		SetTitleAlign(tview.AlignCenter).
 		SetTitleColor(tcell.ColorMediumTurquoise).
-		SetBorderColor(tcell.ColorBeige)
-	v.headerTable.SetSelectable(true, false)
-	
+		SetBorderColor(tcell.ColorMediumTurquoise)
+	v.breadcrumbBar.SetSelectable(true, false)
+
 	// Initially show only the data table
 	v.rightPanel.AddItem(v.dataTable, 0, 1, true)
-	
+
 	// Add panels to main layout
 	v.content.AddItem(v.leftPanel, 30, 0, true)
 	v.content.AddItem(v.rightPanel, 0, 1, false)
-	
+
 	// Set up input handlers
 	v.setupInputHandlers()
-	
+
 	// Add to pages
 	pages := v.manager.Pages()
 	pages.AddPage("vault", v.content, true, true)
@@ -299,75 +299,28 @@ func (v *View) setupInputHandlers() {
 				// Check if it's a directory or secret
 				typeCell := v.dataTable.GetCell(row, 1)
 				pathCell := v.dataTable.GetCell(row, 2)
-				
+
 				if typeCell != nil && strings.Contains(typeCell.Text, "Directory") {
-					// Navigate into directory
+					// Navigate into directory or try to navigate first, fallback to secret modal
 					if pathCell != nil {
-						v.navigateToPath(pathCell.Text)
+						// For "Secret/Directory", try navigation first, if it fails, show as secret
+						if strings.Contains(typeCell.Text, "Secret/Directory") {
+							v.tryNavigateOrShowSecret(pathCell.Text)
+						} else {
+							v.navigateToPath(pathCell.Text)
+						}
 					}
 				} else {
-					// Show secret details in split pane
+					// Show secret details in modal
 					if pathCell != nil {
-						v.showSecretInSplitPane(pathCell.Text)
+						v.showSecretModal(pathCell.Text)
 					}
 				}
 			}
 			return nil
-		case tcell.KeyUp, tcell.KeyDown:
-			// Update details when selection changes
-			v.updateDetailsOnSelectionChange()
-			return event
 		case tcell.KeyLeft:
-			// Only move to left panel if we're at the first item
-			row, _ := v.dataTable.GetSelection()
-			if row <= 1 { // Header or first item
-				v.manager.SetFocus(v.leftPanel)
-				return nil
-			}
-			return event
-		case tcell.KeyRight:
-			// Move to header row if we have a secret loaded
-			if v.state.currentSecret != nil {
-				v.manager.SetFocus(v.headerTable)
-				return nil
-			}
-			return event
-		}
-		return event
-	})
-	
-	v.headerTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEnter:
-			row, col := v.headerTable.GetSelection()
-			if row >= 0 {
-				cell := v.headerTable.GetCell(row, col)
-				if cell != nil {
-					v.switchViewType(cell.Text)
-				}
-			}
-			return nil
-		case tcell.KeyLeft:
-			row, col := v.headerTable.GetSelection()
-			if col > 0 {
-				v.headerTable.Select(row, col-1)
-				// Update the view immediately
-				cell := v.headerTable.GetCell(row, col-1)
-				if cell != nil {
-					v.switchViewType(cell.Text)
-				}
-			}
-			return nil
-		case tcell.KeyRight:
-			row, col := v.headerTable.GetSelection()
-			if col < 2 { // We have 3 columns (0, 1, 2)
-				v.headerTable.Select(row, col+1)
-				// Update the view immediately
-				cell := v.headerTable.GetCell(row, col+1)
-				if cell != nil {
-					v.switchViewType(cell.Text)
-				}
-			}
+			// Move to left panel
+			v.manager.App().SetFocus(v.leftPanel)
 			return nil
 		}
 		return event
@@ -535,23 +488,52 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 					v.toggleRowNumbers()
 					return nil
 				}
+			case 'y':
+				v.handleCopyToClipboard()
+				return nil
+			case '?', 'h':
+				v.showHelpModal()
+				return nil
+			case '1', '2', '3', '4', '5':
+				// Quick view switching with number keys when breadcrumbs are visible
+				if v.state.breadcrumbVisible {
+					views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+					viewIndex := int(event.Rune() - '1')
+					if viewIndex >= 0 && viewIndex < len(views) {
+						v.switchToView(views[viewIndex])
+					}
+					return nil
+				}
 			}
 		}
 
 		switch event.Key() {
+		case tcell.KeyLeft, tcell.KeyRight:
+			// Allow side arrow keys to navigate breadcrumb views when breadcrumbs are visible
+			if v.state.breadcrumbVisible && currentFocus == v.dataTable {
+				views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+				currentIndex := -1
+				for i, view := range views {
+					if view == v.state.currentViewType {
+						currentIndex = i
+						break
+					}
+				}
+
+				if currentIndex >= 0 {
+					if event.Key() == tcell.KeyLeft && currentIndex > 0 {
+						v.switchToView(views[currentIndex-1])
+					} else if event.Key() == tcell.KeyRight && currentIndex < len(views)-1 {
+						v.switchToView(views[currentIndex+1])
+					}
+				}
+				return nil
+			}
 		case tcell.KeyTab:
 			if currentFocus == v.leftPanel {
 				v.manager.SetFocus(v.dataTable)
-			} else if currentFocus == v.dataTable {
-				if v.state.currentSecret != nil {
-					v.manager.SetFocus(v.headerTable)
-				} else {
-					v.manager.SetFocus(v.leftPanel)
-				}
-			} else if currentFocus == v.headerTable {
-				v.manager.SetFocus(v.detailsTable)
-			} else if currentFocus == v.detailsTable {
-				v.manager.SetFocus(v.leftPanel)
+			} else {
+				v.manager.App().SetFocus(v.leftPanel)
 			}
 			return nil
 		case tcell.KeyEnter:
@@ -562,16 +544,21 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 					// Check if it's a directory or secret
 					typeCell := v.dataTable.GetCell(row, 1)
 					pathCell := v.dataTable.GetCell(row, 2)
-					
+
 					if typeCell != nil && strings.Contains(typeCell.Text, "Directory") {
-						// Navigate into directory
+						// Navigate into directory or try to navigate first, fallback to secret modal
 						if pathCell != nil {
-							v.navigateToPath(pathCell.Text)
+							// For "Secret/Directory", try navigation first, if it fails, show as secret
+							if strings.Contains(typeCell.Text, "Secret/Directory") {
+								v.tryNavigateOrShowSecret(pathCell.Text)
+							} else {
+								v.navigateToPath(pathCell.Text)
+							}
 						}
 					} else {
-						// Show secret details in split pane
+						// Show secret details in modal
 						if pathCell != nil {
-							v.showSecretInSplitPane(pathCell.Text)
+							v.showSecretModal(pathCell.Text)
 						}
 					}
 				}
@@ -584,7 +571,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 				return nil
 			}
 			if event.Key() == tcell.KeyEsc && currentFocus == v.dataTable {
-				v.manager.SetFocus(v.leftPanel)
+				v.manager.App().SetFocus(v.leftPanel)
 				return nil
 			}
 		}
@@ -647,12 +634,12 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 }
 
 func (v *View) showMountSecrets(mountPath string) {
+	// Clear the right panel data immediately when switching mounts
+	v.dataTable.Clear()
+	v.resetToSimpleLayout() // Ensure we're in simple layout (no breadcrumbs)
+
 	v.showLoading(fmt.Sprintf("Fetching secrets from mount %s...", mountPath))
 	go func() {
-		// Clear any current secret and reset to simple layout
-		v.state.currentSecret = nil
-		v.resetToSimpleLayout()
-		
 		// Handle different mount types
 		switch mountPath {
 		case "sys/":
@@ -667,7 +654,7 @@ func (v *View) showMountSecrets(mountPath string) {
 
 func (v *View) handleKVMount(mountPath string) {
 	secrets, err := v.service.ListSecrets(v.ctx, v.state.vaultAddr, v.state.vaultToken, mountPath)
-	
+
 	v.manager.App().QueueUpdateDraw(func() {
 		defer v.hideLoading()
 
@@ -684,7 +671,7 @@ func (v *View) handleKVMount(mountPath string) {
 
 func (v *View) showKVContents(mountPath string, paths []string) {
 	v.dataTable.Clear()
-	
+
 	// Add header
 	header := []string{"Name", "Type", "Path"}
 	for col, value := range header {
@@ -695,42 +682,47 @@ func (v *View) showKVContents(mountPath string, paths []string) {
 			SetAttributes(tcell.AttrBold)
 		v.dataTable.SetCell(0, col, cell)
 	}
-	
+
 	// Add rows for each path
 	for row, path := range paths {
 		rowIndex := row + 1
-		
+
 		// Determine if it's a directory or secret
+		// For Vault KV, directories end with "/" and secrets don't
 		isDirectory := strings.HasSuffix(path, "/")
 		itemType := "Secret"
 		if isDirectory {
 			itemType = "Directory"
+		} else {
+			// For paths without trailing slash, we need to try to determine if it's a directory
+			// by attempting to list it. For now, assume it's a secret unless it has a trailing slash
+			itemType = "Secret/Directory" // Indicate it could be either
 		}
-		
+
 		// Create cells
 		name := strings.TrimSuffix(path, "/")
 		fullPath := mountPath + "/" + path
 		// Clean up double slashes
 		fullPath = strings.ReplaceAll(fullPath, "//", "/")
-		
+
 		nameCell := tview.NewTableCell(name)
 		nameCell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
-		
+
 		typeCell := tview.NewTableCell(itemType)
 		if isDirectory {
 			typeCell.SetTextColor(style.GruvboxMaterial.Blue).SetAlign(tview.AlignLeft).SetSelectable(true)
 		} else {
 			typeCell.SetTextColor(style.GruvboxMaterial.Green).SetAlign(tview.AlignLeft).SetSelectable(true)
 		}
-		
+
 		pathCell := tview.NewTableCell(fullPath)
 		pathCell.SetTextColor(tcell.ColorDarkGray).SetAlign(tview.AlignLeft).SetSelectable(true)
-		
+
 		v.dataTable.SetCell(rowIndex, 0, nameCell)
 		v.dataTable.SetCell(rowIndex, 1, typeCell)
 		v.dataTable.SetCell(rowIndex, 2, pathCell)
 	}
-	
+
 	v.dataTable.SetFixed(1, 0)
 	v.dataTable.Select(1, 0)
 }
@@ -738,30 +730,32 @@ func (v *View) showKVContents(mountPath string, paths []string) {
 func (v *View) handleSystemMount(mountPath string) {
 	v.manager.App().QueueUpdateDraw(func() {
 		defer v.hideLoading()
-		
+
 		// Show warning for system mount
 		v.manager.UpdateStatusBar("⚠️  System mount - Use with caution! This contains Vault's internal configuration.")
-		
+
 		// Create a special table showing system information
 		v.showSystemInfo()
+		v.manager.SetFocus(v.dataTable)
 	})
 }
 
 func (v *View) handleIdentityMount(mountPath string) {
 	v.manager.App().QueueUpdateDraw(func() {
 		defer v.hideLoading()
-		
+
 		// Show warning for identity mount
 		v.manager.UpdateStatusBar("⚠️  Identity mount - Advanced Vault feature for user management.")
-		
+
 		// Create a special table showing identity information
 		v.showIdentityInfo()
+		v.manager.SetFocus(v.dataTable)
 	})
 }
 
 func (v *View) showSystemInfo() {
 	v.dataTable.Clear()
-	
+
 	// Add system information rows
 	systemInfo := [][]string{
 		{"Component", "Status", "Description"},
@@ -770,7 +764,7 @@ func (v *View) showSystemInfo() {
 		{"Policies", "Loaded", "Access control policies"},
 		{"Audit Devices", "Configured", "Logging and monitoring"},
 	}
-	
+
 	for row, info := range systemInfo {
 		for col, value := range info {
 			cell := tview.NewTableCell(value)
@@ -787,14 +781,14 @@ func (v *View) showSystemInfo() {
 			v.dataTable.SetCell(row, col, cell)
 		}
 	}
-	
+
 	v.dataTable.SetFixed(1, 0)
 	v.dataTable.Select(1, 0)
 }
 
 func (v *View) showIdentityInfo() {
 	v.dataTable.Clear()
-	
+
 	// Add identity information rows
 	identityInfo := [][]string{
 		{"Component", "Status", "Description"},
@@ -803,7 +797,7 @@ func (v *View) showIdentityInfo() {
 		{"Aliases", "Linked", "External identity mappings"},
 		{"Policies", "Assigned", "Entity-specific permissions"},
 	}
-	
+
 	for row, info := range identityInfo {
 		for col, value := range info {
 			cell := tview.NewTableCell(value)
@@ -820,7 +814,7 @@ func (v *View) showIdentityInfo() {
 			v.dataTable.SetCell(row, col, cell)
 		}
 	}
-	
+
 	v.dataTable.SetFixed(1, 0)
 	v.dataTable.Select(1, 0)
 }
@@ -829,7 +823,7 @@ func (v *View) navigateToPath(path string) {
 	v.showLoading(fmt.Sprintf("Loading contents of %s...", path))
 	go func() {
 		secrets, err := v.service.ListSecrets(v.ctx, v.state.vaultAddr, v.state.vaultToken, path)
-		
+
 		v.manager.App().QueueUpdateDraw(func() {
 			defer v.hideLoading()
 
@@ -838,279 +832,210 @@ func (v *View) navigateToPath(path string) {
 				return
 			}
 
-			// Clear any current secret and reset to simple layout
+			// Just show directory contents - NO breadcrumbs for directory listings
 			v.state.currentSecret = nil
-			v.resetToSimpleLayout()
+			v.state.currentPath = path
+			v.resetToSimpleLayout() // Make sure we're using simple layout
 			v.showKVContents(path, secrets)
-			v.manager.UpdateStatusBar(fmt.Sprintf("Showing contents of %s", path))
+			v.manager.SetFocus(v.dataTable) // Focus on right panel
+			v.manager.UpdateStatusBar(fmt.Sprintf("Showing contents of %s | ↑↓ Navigate | Enter: View item | Tab: Switch panels | /: Filter | ?: Help", path))
 		})
 	}()
 }
 
-func (v *View) showSecretInSplitPane(path string) {
-	v.showLoading(fmt.Sprintf("Loading secret %s...", path))
+func (v *View) tryNavigateOrShowSecret(path string) {
+	// First try to navigate (as if it's a directory)
+	v.showLoading(fmt.Sprintf("Loading contents of %s...", path))
 	go func() {
-		secret, err := v.service.GetSecret(v.ctx, v.state.vaultAddr, v.state.vaultToken, path)
-		
+		secrets, err := v.service.ListSecrets(v.ctx, v.state.vaultAddr, v.state.vaultToken, path)
+
 		v.manager.App().QueueUpdateDraw(func() {
 			defer v.hideLoading()
 
 			if err != nil {
-				v.manager.UpdateStatusBar(fmt.Sprintf("Error loading secret %s: %v", path, err))
+				// If navigation fails, try showing as secret instead WITH breadcrumbs
+				v.showSecretWithBreadcrumbs(path)
 				return
 			}
 
-			v.state.currentSecret = secret
-			v.state.currentViewType = "Overview"
-			v.setupSplitPane()
-			v.updateDetailsView()
+			// Just show directory contents - NO breadcrumbs for directory listings
+			v.state.currentSecret = nil
+			v.state.currentPath = path
+			v.resetToSimpleLayout() // Make sure we're using simple layout
+			v.showKVContents(path, secrets)
+			v.manager.SetFocus(v.dataTable) // Focus on right panel
+			v.manager.UpdateStatusBar(fmt.Sprintf("Showing contents of %s | ↑↓ Navigate | Enter: View item | Tab: Switch panels | /: Filter | ?: Help", path))
 		})
 	}()
 }
 
-func (v *View) updateDetailsOnSelectionChange() {
-	// Only update if we're in split pane mode and have a current secret
-	if v.state.currentSecret == nil {
-		return
-	}
-	
-	row, _ := v.dataTable.GetSelection()
-	if row > 0 { // Header is row 0
-		typeCell := v.dataTable.GetCell(row, 1)
-		pathCell := v.dataTable.GetCell(row, 2)
-		
-		// Only update if it's a secret (not a directory)
-		if typeCell != nil && !strings.Contains(typeCell.Text, "Directory") && pathCell != nil {
-			// Load the new secret
-			v.showSecretInSplitPane(pathCell.Text)
-		}
-	}
+func (v *View) showSecretModal(path string) {
+	v.showLoading(fmt.Sprintf("Loading secret %s...", path))
+	go func() {
+		secret, err := v.service.GetSecret(v.ctx, v.state.vaultAddr, v.state.vaultToken, path)
+
+		v.manager.App().QueueUpdateDraw(func() {
+			defer v.hideLoading()
+
+			if err != nil {
+				v.showErrorModal("Error Loading Secret", fmt.Sprintf("Failed to load secret %s: %v", path, err))
+				return
+			}
+
+			v.showSecretDetailsModal(secret)
+		})
+	}()
+}
+
+func (v *View) showSecretWithBreadcrumbs(path string) {
+	v.showLoading(fmt.Sprintf("Loading secret %s...", path))
+	go func() {
+		secret, err := v.service.GetSecret(v.ctx, v.state.vaultAddr, v.state.vaultToken, path)
+
+		v.manager.App().QueueUpdateDraw(func() {
+			defer v.hideLoading()
+
+			if err != nil {
+				v.showErrorModal("Error Loading Secret", fmt.Sprintf("Failed to load secret %s: %v", path, err))
+				return
+			}
+
+			// This is when we show breadcrumbs - when viewing a specific secret
+			v.state.currentSecret = secret
+			v.state.currentPath = path
+			v.state.currentViewType = "Overview"
+			v.showBreadcrumbLayout()
+			v.updateBreadcrumbBar(path)
+
+			// Show the Overview view by default (like the web interface)
+			v.showOverviewView()
+			v.manager.SetFocus(v.dataTable) // Focus on right panel
+			v.manager.UpdateStatusBar(fmt.Sprintf("Viewing secret %s", path))
+		})
+	}()
 }
 
 func (v *View) resetToSimpleLayout() {
 	// Clear the right panel and show only the data table
 	v.rightPanel.Clear()
+	v.state.breadcrumbVisible = false
 	v.rightPanel.AddItem(v.dataTable, 0, 1, true)
 }
 
-func (v *View) setupSplitPane() {
-	// Clear the right panel
+func (v *View) showBreadcrumbLayout() {
+	// Clear and set up layout with breadcrumb navigation
 	v.rightPanel.Clear()
-	
-	// Add header table
-	v.setupHeaderTable()
-	v.rightPanel.AddItem(v.headerTable, 3, 0, false)
-	
-	// Add details table (takes up remaining space)
-	v.rightPanel.AddItem(v.detailsTable, 0, 1, true)
+	v.state.breadcrumbVisible = true
+
+	// Add breadcrumb bar (small fixed height)
+	v.rightPanel.AddItem(v.breadcrumbBar, 4, 0, false)
+
+	// Add data table (remaining space)
+	v.rightPanel.AddItem(v.dataTable, 0, 1, true)
 }
 
-func (v *View) setupHeaderTable() {
-	v.headerTable.Clear()
-	
-	// Add header tabs
-	tabs := []string{"Overview", "Secret", "Metadata"}
-	for i, tab := range tabs {
-		cell := tview.NewTableCell(tab)
-		if tab == v.state.currentViewType {
-			cell.SetTextColor(tcell.ColorLightYellow).SetAlign(tview.AlignCenter).SetSelectable(true)
-		} else {
-			cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignCenter).SetSelectable(true)
-		}
-		v.headerTable.SetCell(0, i, cell)
-	}
-	
-	v.headerTable.SetFixed(1, 0)
-	v.headerTable.SetSelectable(true, true) // Enable both row and column selection
-	
-	// Select the current view type
-	for i, tab := range tabs {
-		if tab == v.state.currentViewType {
-			v.headerTable.Select(0, i)
-			break
-		}
-	}
-}
-
-func (v *View) switchViewType(viewType string) {
-	v.state.currentViewType = viewType
-	v.updateDetailsView()
-	
-	// Update header highlighting
-	for i := 0; i < 3; i++ {
-		cell := v.headerTable.GetCell(0, i)
-		if cell != nil {
-			if cell.Text == viewType {
-				cell.SetTextColor(tcell.ColorLightYellow)
-			} else {
-				cell.SetTextColor(tcell.ColorBeige)
-			}
-		}
-	}
-}
-
-func (v *View) updateDetailsView() {
-	if v.state.currentSecret == nil {
+func (v *View) updateBreadcrumbBar(path string) {
+	if !v.state.breadcrumbVisible {
 		return
 	}
-	
-	v.detailsTable.Clear()
-	
-	switch v.state.currentViewType {
-	case "Overview":
-		v.showOverviewDetails()
-	case "Secret":
-		v.showSecretDataDetails()
-	case "Metadata":
-		v.showMetadataDetails()
-	}
-}
 
-func (v *View) showOverviewDetails() {
-	// Add header
-	header := []string{"Property", "Value"}
-	for col, value := range header {
-		cell := tview.NewTableCell(value)
-		cell.SetTextColor(style.GruvboxMaterial.Yellow).
-			SetAlign(tview.AlignCenter).
-			SetSelectable(false).
-			SetAttributes(tcell.AttrBold)
-		v.detailsTable.SetCell(0, col, cell)
-	}
-	
-	// Add overview data
-	overviewData := [][]string{
-		{"Path", v.state.currentSecret.Path},
-		{"Mount Type", v.state.currentSecret.MountType},
-		{"Data Keys", fmt.Sprintf("%d", len(v.state.currentSecret.Data))},
-	}
-	
-	row := 1
-	for _, data := range overviewData {
-		for col, value := range data {
-			cell := tview.NewTableCell(value)
-			if col == 0 {
-				cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
-			} else {
-				cell.SetTextColor(tcell.ColorLightGreen).SetAlign(tview.AlignLeft).SetSelectable(true)
-			}
-			v.detailsTable.SetCell(row, col, cell)
+	v.breadcrumbBar.Clear()
+
+	// Available views for the current context
+	views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+
+	for col, viewName := range views {
+		cell := tview.NewTableCell(viewName)
+
+		// Clean breadcrumb colors - selected is turquoise on black, inactive is black on turquoise
+		if viewName == v.state.currentViewType {
+			cell.SetTextColor(tcell.ColorMediumTurquoise).
+				SetBackgroundColor(tcell.ColorBlack).
+				SetAttributes(tcell.AttrBold)
+		} else {
+			cell.SetTextColor(tcell.ColorBlack).
+				SetBackgroundColor(tcell.ColorMediumTurquoise)
 		}
-		row++
-	}
-	
-	v.detailsTable.SetFixed(1, 0)
-	v.detailsTable.Select(1, 0)
-}
 
-func (v *View) showSecretDataDetails() {
-	// Add header
-	header := []string{"Key", "Value"}
-	for col, value := range header {
-		cell := tview.NewTableCell(value)
-		cell.SetTextColor(style.GruvboxMaterial.Yellow).
-			SetAlign(tview.AlignCenter).
-			SetSelectable(false).
-			SetAttributes(tcell.AttrBold)
-		v.detailsTable.SetCell(0, col, cell)
+		cell.SetAlign(tview.AlignCenter).
+			SetSelectable(true)
+
+		v.breadcrumbBar.SetCell(0, col, cell)
 	}
-	
-	// Add secret data
-	keys := make([]string, 0, len(v.state.currentSecret.Data))
-	for key := range v.state.currentSecret.Data {
-		keys = append(keys, key)
+
+	// Add path information in second row
+	pathCell := tview.NewTableCell(fmt.Sprintf("Path: %s", path)).
+		SetTextColor(tcell.ColorGray).
+		SetAlign(tview.AlignLeft).
+		SetSelectable(false)
+	v.breadcrumbBar.SetCell(1, 0, pathCell)
+
+	// Span the path across all columns
+	for col := 1; col < len(views); col++ {
+		v.breadcrumbBar.SetCell(1, col, tview.NewTableCell("").SetSelectable(false))
 	}
-	sort.Strings(keys)
-	
-	row := 1
-	for _, key := range keys {
-		value := fmt.Sprintf("%v", v.state.currentSecret.Data[key])
-		
-		keyCell := tview.NewTableCell(key)
-		keyCell.SetTextColor(tcell.ColorMediumTurquoise).SetAlign(tview.AlignLeft).SetSelectable(true)
-		v.detailsTable.SetCell(row, 0, keyCell)
-		
-		valueCell := tview.NewTableCell(value)
-		valueCell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
-		v.detailsTable.SetCell(row, 1, valueCell)
-		row++
+
+	// Add navigation instructions in third row
+	instructionsCell := tview.NewTableCell("1-5: Quick switch | ← → : Navigate views | Enter: Select | Tab: Switch panels").
+		SetTextColor(tcell.ColorDarkGray).
+		SetAlign(tview.AlignCenter).
+		SetSelectable(false)
+	v.breadcrumbBar.SetCell(2, 0, instructionsCell)
+
+	// Span instructions across all columns
+	for col := 1; col < len(views); col++ {
+		v.breadcrumbBar.SetCell(2, col, tview.NewTableCell("").SetSelectable(false))
 	}
-	
-	v.detailsTable.SetFixed(1, 0)
-	v.detailsTable.Select(1, 0)
-	
-	// Set up input capture for the details table to show modal on Enter
-	v.detailsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+
+	v.breadcrumbBar.SetFixed(3, 0)
+	v.breadcrumbBar.SetSelectable(true, false)
+
+	// Set up input handling for breadcrumb navigation
+	v.breadcrumbBar.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEnter:
-			row, _ := v.detailsTable.GetSelection()
-			if row > 0 { // Skip header
-				keyCell := v.detailsTable.GetCell(row, 0)
-				valueCell := v.detailsTable.GetCell(row, 1)
-				if keyCell != nil && valueCell != nil {
-					v.showValueModal(keyCell.Text, valueCell.Text)
-				}
+			row, col := v.breadcrumbBar.GetSelection()
+			if row == 0 && col < len(views) {
+				v.switchToView(views[col])
 			}
+			return nil
+		case tcell.KeyLeft:
+			row, col := v.breadcrumbBar.GetSelection()
+			if col > 0 {
+				v.breadcrumbBar.Select(row, col-1)
+			}
+			return nil
+		case tcell.KeyRight:
+			row, col := v.breadcrumbBar.GetSelection()
+			if col < len(views)-1 {
+				v.breadcrumbBar.Select(row, col+1)
+			}
+			return nil
+		case tcell.KeyDown:
+			v.manager.SetFocus(v.dataTable)
 			return nil
 		}
 		return event
 	})
 }
 
-func (v *View) showValueModal(key, value string) {
-	// Create modal for displaying the full value
-	modal := tview.NewModal().
-		SetText(fmt.Sprintf("Key: %s\n\nValue:\n%s", key, value)).
-		AddButtons([]string{"Copy", "Close"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			if buttonLabel == "Copy" {
-				// Copy to clipboard
-				v.manager.UpdateStatusBar(fmt.Sprintf("Copied value for key '%s' to clipboard", key))
-			}
-			v.manager.Pages().RemovePage("valueModal")
-		})
-	
-	v.manager.Pages().AddPage("valueModal", modal, true, true)
-	v.manager.App().SetFocus(modal)
-}
+func (v *View) switchToView(viewType string) {
+	v.state.currentViewType = viewType
+	v.updateBreadcrumbBar(v.state.currentPath)
 
-func (v *View) showMetadataDetails() {
-	// Add header
-	header := []string{"Property", "Value"}
-	for col, value := range header {
-		cell := tview.NewTableCell(value)
-		cell.SetTextColor(style.GruvboxMaterial.Yellow).
-			SetAlign(tview.AlignCenter).
-			SetSelectable(false).
-			SetAttributes(tcell.AttrBold)
-		v.detailsTable.SetCell(0, col, cell)
+	// Update the data table based on view type
+	switch viewType {
+	case "Overview":
+		v.showOverviewView()
+	case "Secrets":
+		v.showSecretsView()
+	case "Metadata":
+		v.showMetadataView()
+	case "Paths":
+		v.showPathsView()
+	case "History":
+		v.showHistoryView()
 	}
-	
-	// Add metadata
-	if v.state.currentSecret.Metadata != nil {
-		metadataData := [][]string{
-			{"Version", fmt.Sprintf("%d", v.state.currentSecret.Metadata.Version)},
-			{"Created Time", v.state.currentSecret.Metadata.CreatedTime.Format("2006-01-02 15:04:05 UTC")},
-			{"Custom Metadata", fmt.Sprintf("%v", v.state.currentSecret.Metadata.CustomMetadata)},
-		}
-		
-		row := 1
-		for _, data := range metadataData {
-			for col, value := range data {
-				cell := tview.NewTableCell(value)
-				if col == 0 {
-					cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
-				} else {
-					cell.SetTextColor(tcell.ColorLightCyan).SetAlign(tview.AlignLeft).SetSelectable(true)
-				}
-				v.detailsTable.SetCell(row, col, cell)
-			}
-			row++
-		}
-	}
-	
-	v.detailsTable.SetFixed(1, 0)
-	v.detailsTable.Select(1, 0)
 }
 
 func (v *View) Reinitialize(cfg aws.Config) error {
@@ -1249,9 +1174,6 @@ func (v *View) previousPage() {
 	}
 }
 
-
-
-
 func (v *View) showModal(modal tview.Primitive, name string, width, height int, onDismiss func()) {
 	if v.manager.Pages().HasPage(name) {
 		return
@@ -1272,8 +1194,8 @@ func (v *View) showModal(modal tview.Primitive, name string, width, height int, 
 			return nil
 		}
 		// Prevent arrow keys from propagating to the main window
-		if event.Key() == tcell.KeyUp || event.Key() == tcell.KeyDown || 
-		   event.Key() == tcell.KeyLeft || event.Key() == tcell.KeyRight {
+		if event.Key() == tcell.KeyUp || event.Key() == tcell.KeyDown ||
+			event.Key() == tcell.KeyLeft || event.Key() == tcell.KeyRight {
 			return nil
 		}
 		return event
@@ -1347,7 +1269,7 @@ func (v *View) getMountDescription(mountPath string, mount *vault.Mount) string 
 	if baseDesc == "" {
 		baseDesc = mount.Type
 	}
-	
+
 	// Add mount type and warnings
 	switch mountPath {
 	case "secret/":
@@ -1363,3 +1285,400 @@ func (v *View) getMountDescription(mountPath string, mount *vault.Mount) string 
 	}
 }
 
+// handleCopyToClipboard handles copying the currently selected item to clipboard
+func (v *View) handleCopyToClipboard() {
+	currentFocus := v.manager.App().GetFocus()
+
+	switch currentFocus {
+	case v.dataTable:
+		row, col := v.dataTable.GetSelection()
+		if row > 0 { // Skip header
+			cell := v.dataTable.GetCell(row, col)
+			if cell != nil {
+				if err := v.copyToClipboard(cell.Text); err != nil {
+					v.manager.UpdateStatusBar("Failed to copy to clipboard")
+				} else {
+					v.manager.UpdateStatusBar(fmt.Sprintf("Copied \"%s\" to clipboard", cell.Text))
+				}
+			}
+		}
+	case v.leftPanel:
+		currentItem := v.leftPanel.GetCurrentItem()
+		mainText, _ := v.leftPanel.GetItemText(currentItem)
+		if err := v.copyToClipboard(mainText); err != nil {
+			v.manager.UpdateStatusBar("Failed to copy to clipboard")
+		} else {
+			v.manager.UpdateStatusBar(fmt.Sprintf("Copied \"%s\" to clipboard", mainText))
+		}
+	default:
+		v.manager.UpdateStatusBar("Nothing selected to copy")
+	}
+}
+
+// showErrorModal displays an error in a modal dialog
+func (v *View) showErrorModal(title, message string) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("%s\n\n%s", title, message)).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			v.manager.Pages().RemovePage("error")
+		})
+
+	v.manager.Pages().AddPage("error", modal, true, true)
+	v.manager.App().SetFocus(modal)
+}
+
+// showSecretDetailsModal displays secret details in a clean modal
+func (v *View) showSecretDetailsModal(secret *vault.Secret) {
+	// Create a table to display the secret data
+	table := tview.NewTable()
+	table.SetBorder(true).
+		SetTitle(fmt.Sprintf(" Secret: %s ", secret.Path)).
+		SetTitleAlign(tview.AlignCenter).
+		SetBorderColor(tcell.ColorMediumTurquoise)
+
+	// Add header
+	table.SetCell(0, 0, tview.NewTableCell("Key").
+		SetTextColor(tcell.ColorYellow).
+		SetAlign(tview.AlignCenter).
+		SetAttributes(tcell.AttrBold).
+		SetSelectable(false))
+	table.SetCell(0, 1, tview.NewTableCell("Value").
+		SetTextColor(tcell.ColorYellow).
+		SetAlign(tview.AlignCenter).
+		SetAttributes(tcell.AttrBold).
+		SetSelectable(false))
+
+	// Add secret data rows
+	keys := make([]string, 0, len(secret.Data))
+	for key := range secret.Data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for i, key := range keys {
+		value := fmt.Sprintf("%v", secret.Data[key])
+
+		keyCell := tview.NewTableCell(key)
+		keyCell.SetTextColor(tcell.ColorMediumTurquoise).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(true)
+
+		valueCell := tview.NewTableCell(value)
+		valueCell.SetTextColor(tcell.ColorBeige).
+			SetAlign(tview.AlignLeft).
+			SetSelectable(true)
+
+		table.SetCell(i+1, 0, keyCell)
+		table.SetCell(i+1, 1, valueCell)
+	}
+
+	table.SetFixed(1, 0)
+	table.SetSelectable(true, false)
+	if len(keys) > 0 {
+		table.Select(1, 0)
+	}
+
+	// Add input capture for copying values and closing
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEsc:
+			v.manager.Pages().RemovePage("secretModal")
+			return nil
+		case tcell.KeyRune:
+			if event.Rune() == 'y' {
+				row, col := table.GetSelection()
+				if row > 0 {
+					cell := table.GetCell(row, col)
+					if cell != nil {
+						if err := v.copyToClipboard(cell.Text); err != nil {
+							v.manager.UpdateStatusBar("Failed to copy to clipboard")
+						} else {
+							v.manager.UpdateStatusBar(fmt.Sprintf("Copied \"%s\" to clipboard", cell.Text))
+						}
+					}
+				}
+				return nil
+			}
+		}
+		return event
+	})
+
+	// Create the modal container
+	modal := tview.NewFlex().SetDirection(tview.FlexRow)
+
+	// Add navigation instructions
+	instructions := tview.NewTextView().
+		SetText("↑↓ Navigate • y Copy • Tab Switch panels • / Filter • ? Help • Esc Close").
+		SetTextAlign(tview.AlignCenter).
+		SetTextColor(tcell.ColorGray)
+
+	modal.AddItem(instructions, 1, 0, false)
+	modal.AddItem(table, 0, 1, true)
+
+	// Add metadata info if available
+	if secret.Metadata != nil {
+		metaText := fmt.Sprintf("Version: %d | Created: %s",
+			secret.Metadata.Version,
+			secret.Metadata.CreatedTime.Format("2006-01-02 15:04:05"))
+		metaInfo := tview.NewTextView().
+			SetText(metaText).
+			SetTextAlign(tview.AlignCenter).
+			SetTextColor(tcell.ColorDarkCyan)
+		modal.AddItem(metaInfo, 1, 0, false)
+	}
+
+	// Show the modal
+	v.manager.Pages().AddPage("secretModal", modal, true, true)
+	v.manager.App().SetFocus(table)
+}
+
+// showHelpModal displays keyboard shortcuts help
+func (v *View) showHelpModal() {
+	helpText := `Vault View - Keyboard Shortcuts
+
+Navigation:
+  Tab        - Switch between panels
+  Enter      - Select mount or view secret
+  Esc        - Return to previous panel
+
+Breadcrumb Navigation:
+  1-5        - Quick switch to views (Overview/Secrets/Metadata/Paths/History)
+  ← →        - Navigate between views when breadcrumbs visible
+  Arrow keys - Navigate breadcrumb tabs when focused on breadcrumb bar
+
+Search & Filter:
+  /          - Filter current panel
+  Backspace  - Clear filter
+
+Data Operations:
+  y          - Copy selected item to clipboard
+  r          - Toggle row numbers
+  n/p        - Next/Previous page
+
+Help:
+  ? or h     - Show this help
+  Esc        - Close help`
+
+	modal := tview.NewModal().
+		SetText(helpText).
+		AddButtons([]string{"Close"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			v.manager.Pages().RemovePage("help")
+		})
+
+	v.manager.Pages().AddPage("help", modal, true, true)
+	v.manager.App().SetFocus(modal)
+}
+
+// View functions for breadcrumb navigation
+func (v *View) showOverviewView() {
+	v.dataTable.Clear()
+
+	// Add overview header
+	overviewData := [][]string{
+		{"Property", "Value"},
+		{"Current Path", v.state.currentPath},
+		{"Mount Type", "KV Store"},
+		{"Status", "Active"},
+		{"Last Updated", "Now"},
+	}
+
+	for row, data := range overviewData {
+		for col, value := range data {
+			cell := tview.NewTableCell(value)
+			if row == 0 {
+				cell.SetTextColor(style.GruvboxMaterial.Yellow).
+					SetAlign(tview.AlignCenter).
+					SetSelectable(false).
+					SetAttributes(tcell.AttrBold)
+			} else {
+				if col == 0 {
+					cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
+				} else {
+					cell.SetTextColor(tcell.ColorLightGreen).SetAlign(tview.AlignLeft).SetSelectable(true)
+				}
+			}
+			v.dataTable.SetCell(row, col, cell)
+		}
+	}
+
+	v.dataTable.SetFixed(1, 0)
+	v.dataTable.Select(1, 0)
+}
+
+func (v *View) showSecretsView() {
+	v.dataTable.Clear()
+
+	// Show the current secret's data when we have a specific secret loaded
+	if v.state.currentSecret != nil {
+		// Create a table showing the secret data
+		headers := []string{"Key", "Value"}
+		for col, value := range headers {
+			cell := tview.NewTableCell(value)
+			cell.SetTextColor(style.GruvboxMaterial.Yellow).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false).
+				SetAttributes(tcell.AttrBold)
+			v.dataTable.SetCell(0, col, cell)
+		}
+
+		// Get sorted keys
+		keys := make([]string, 0, len(v.state.currentSecret.Data))
+		for key := range v.state.currentSecret.Data {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		// Add secret data rows
+		for i, key := range keys {
+			value := fmt.Sprintf("%v", v.state.currentSecret.Data[key])
+
+			keyCell := tview.NewTableCell(key)
+			keyCell.SetTextColor(tcell.ColorMediumTurquoise).
+				SetAlign(tview.AlignLeft).
+				SetSelectable(true)
+
+			valueCell := tview.NewTableCell(value)
+			valueCell.SetTextColor(tcell.ColorBeige).
+				SetAlign(tview.AlignLeft).
+				SetSelectable(true)
+
+			v.dataTable.SetCell(i+1, 0, keyCell)
+			v.dataTable.SetCell(i+1, 1, valueCell)
+		}
+
+		v.dataTable.SetFixed(1, 0)
+		if len(keys) > 0 {
+			v.dataTable.Select(1, 0)
+		}
+	} else {
+		// If no secret loaded, show a message
+		v.dataTable.SetCell(0, 0,
+			tview.NewTableCell("No secret data available. Select a secret to view its contents.").
+				SetTextColor(tcell.ColorBeige).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false))
+	}
+}
+
+func (v *View) showMetadataView() {
+	v.dataTable.Clear()
+
+	// Add metadata header
+	metadataData := [][]string{
+		{"Metadata Type", "Value"},
+		{"Path", v.state.currentPath},
+		{"Engine Version", "KV Version 2"},
+		{"Max Versions", "10"},
+		{"CAS Required", "false"},
+		{"Delete Version After", "0s"},
+	}
+
+	for row, data := range metadataData {
+		for col, value := range data {
+			cell := tview.NewTableCell(value)
+			if row == 0 {
+				cell.SetTextColor(style.GruvboxMaterial.Yellow).
+					SetAlign(tview.AlignCenter).
+					SetSelectable(false).
+					SetAttributes(tcell.AttrBold)
+			} else {
+				if col == 0 {
+					cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
+				} else {
+					cell.SetTextColor(tcell.ColorLightCyan).SetAlign(tview.AlignLeft).SetSelectable(true)
+				}
+			}
+			v.dataTable.SetCell(row, col, cell)
+		}
+	}
+
+	v.dataTable.SetFixed(1, 0)
+	v.dataTable.Select(1, 0)
+}
+
+func (v *View) showPathsView() {
+	v.dataTable.Clear()
+
+	// Show path navigation history
+	pathsData := [][]string{
+		{"Path", "Type", "Last Accessed"},
+		{v.state.currentPath, "Current", "Now"},
+		{"secret/", "Mount", "Recently"},
+		{"secret/myapp/", "Directory", "Recently"},
+		{"secret/configs/", "Directory", "Recently"},
+	}
+
+	for row, data := range pathsData {
+		for col, value := range data {
+			cell := tview.NewTableCell(value)
+			if row == 0 {
+				cell.SetTextColor(style.GruvboxMaterial.Yellow).
+					SetAlign(tview.AlignCenter).
+					SetSelectable(false).
+					SetAttributes(tcell.AttrBold)
+			} else {
+				switch col {
+				case 0:
+					cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
+				case 1:
+					if value == "Current" {
+						cell.SetTextColor(style.GruvboxMaterial.Green).SetAlign(tview.AlignLeft).SetSelectable(true)
+					} else {
+						cell.SetTextColor(style.GruvboxMaterial.Blue).SetAlign(tview.AlignLeft).SetSelectable(true)
+					}
+				case 2:
+					cell.SetTextColor(tcell.ColorGray).SetAlign(tview.AlignLeft).SetSelectable(true)
+				}
+			}
+			v.dataTable.SetCell(row, col, cell)
+		}
+	}
+
+	v.dataTable.SetFixed(1, 0)
+	v.dataTable.Select(1, 0)
+}
+
+func (v *View) showHistoryView() {
+	v.dataTable.Clear()
+
+	// Show version history for the current path
+	historyData := [][]string{
+		{"Version", "Created", "Operation", "User"},
+		{"3", "2024-01-15 10:30", "UPDATE", "admin"},
+		{"2", "2024-01-10 14:20", "UPDATE", "user1"},
+		{"1", "2024-01-05 09:15", "CREATE", "admin"},
+	}
+
+	for row, data := range historyData {
+		for col, value := range data {
+			cell := tview.NewTableCell(value)
+			if row == 0 {
+				cell.SetTextColor(style.GruvboxMaterial.Yellow).
+					SetAlign(tview.AlignCenter).
+					SetSelectable(false).
+					SetAttributes(tcell.AttrBold)
+			} else {
+				switch col {
+				case 0:
+					cell.SetTextColor(tcell.ColorLightYellow).SetAlign(tview.AlignCenter).SetSelectable(true)
+				case 1:
+					cell.SetTextColor(tcell.ColorBeige).SetAlign(tview.AlignLeft).SetSelectable(true)
+				case 2:
+					if value == "CREATE" {
+						cell.SetTextColor(style.GruvboxMaterial.Green).SetAlign(tview.AlignCenter).SetSelectable(true)
+					} else {
+						cell.SetTextColor(style.GruvboxMaterial.Blue).SetAlign(tview.AlignCenter).SetSelectable(true)
+					}
+				case 3:
+					cell.SetTextColor(tcell.ColorGray).SetAlign(tview.AlignLeft).SetSelectable(true)
+				}
+			}
+			v.dataTable.SetCell(row, col, cell)
+		}
+	}
+
+	v.dataTable.SetFixed(1, 0)
+	v.dataTable.Select(1, 0)
+}
