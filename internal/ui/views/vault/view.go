@@ -33,7 +33,6 @@ type View struct {
 	detailsTable  *tview.Table
 	breadcrumbBar *tview.Table
 	filterPrompt  *components.Prompt
-	layout        tview.Primitive
 
 	state viewState
 	ctx   context.Context
@@ -282,50 +281,12 @@ func (v *View) setupLayout() {
 	v.content.AddItem(v.leftPanel, 30, 0, true)
 	v.content.AddItem(v.rightPanel, 0, 1, false)
 
-	// Set up input handlers
-	v.setupInputHandlers()
 
 	// Add to pages
 	pages := v.manager.Pages()
 	pages.AddPage("vault", v.content, true, true)
 }
 
-func (v *View) setupInputHandlers() {
-	v.dataTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEnter:
-			row, _ := v.dataTable.GetSelection()
-			if row > 0 { // Header is row 0
-				// Check if it's a directory or secret
-				typeCell := v.dataTable.GetCell(row, 1)
-				pathCell := v.dataTable.GetCell(row, 2)
-
-				if typeCell != nil && strings.Contains(typeCell.Text, "Directory") {
-					// Navigate into directory or try to navigate first, fallback to secret modal
-					if pathCell != nil {
-						// For "Secret/Directory", try navigation first, if it fails, show as secret
-						if strings.Contains(typeCell.Text, "Secret/Directory") {
-							v.tryNavigateOrShowSecret(pathCell.Text)
-						} else {
-							v.navigateToPath(pathCell.Text)
-						}
-					}
-				} else {
-					// Show secret details in modal
-					if pathCell != nil {
-						v.showSecretModal(pathCell.Text)
-					}
-				}
-			}
-			return nil
-		case tcell.KeyLeft:
-			// Move to left panel
-			v.manager.App().SetFocus(v.leftPanel)
-			return nil
-		}
-		return event
-	})
-}
 
 func (v *View) updateDataTableForSecrets(secrets []*vault.Secret) {
 	v.dataTable.Clear()
@@ -497,10 +458,10 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			case '1', '2', '3', '4', '5':
 				// Quick view switching with number keys when breadcrumbs are visible
 				if v.state.breadcrumbVisible {
-					views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+					viewTypes := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
 					viewIndex := int(event.Rune() - '1')
-					if viewIndex >= 0 && viewIndex < len(views) {
-						v.switchToView(views[viewIndex])
+					if viewIndex >= 0 && viewIndex < len(viewTypes) {
+						v.switchToView(viewTypes[viewIndex])
 					}
 					return nil
 				}
@@ -511,10 +472,10 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 		case tcell.KeyLeft, tcell.KeyRight:
 			// Allow side arrow keys to navigate breadcrumb views when breadcrumbs are visible
 			if v.state.breadcrumbVisible && currentFocus == v.dataTable {
-				views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+				viewTypes := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
 				currentIndex := -1
-				for i, view := range views {
-					if view == v.state.currentViewType {
+				for i, viewType := range viewTypes {
+					if viewType == v.state.currentViewType {
 						currentIndex = i
 						break
 					}
@@ -522,9 +483,9 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 
 				if currentIndex >= 0 {
 					if event.Key() == tcell.KeyLeft && currentIndex > 0 {
-						v.switchToView(views[currentIndex-1])
-					} else if event.Key() == tcell.KeyRight && currentIndex < len(views)-1 {
-						v.switchToView(views[currentIndex+1])
+						v.switchToView(viewTypes[currentIndex-1])
+					} else if event.Key() == tcell.KeyRight && currentIndex < len(viewTypes)-1 {
+						v.switchToView(viewTypes[currentIndex+1])
 					}
 				}
 				return nil
@@ -727,7 +688,7 @@ func (v *View) showKVContents(mountPath string, paths []string) {
 	v.dataTable.Select(1, 0)
 }
 
-func (v *View) handleSystemMount(mountPath string) {
+func (v *View) handleSystemMount(_ string) {
 	v.manager.App().QueueUpdateDraw(func() {
 		defer v.hideLoading()
 
@@ -740,7 +701,7 @@ func (v *View) handleSystemMount(mountPath string) {
 	})
 }
 
-func (v *View) handleIdentityMount(mountPath string) {
+func (v *View) handleIdentityMount(_ string) {
 	v.manager.App().QueueUpdateDraw(func() {
 		defer v.hideLoading()
 
@@ -942,9 +903,9 @@ func (v *View) updateBreadcrumbBar(path string) {
 	v.breadcrumbBar.Clear()
 
 	// Available views for the current context
-	views := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
+	viewTypes := []string{"Overview", "Secrets", "Metadata", "Paths", "History"}
 
-	for col, viewName := range views {
+	for col, viewName := range viewTypes {
 		cell := tview.NewTableCell(viewName)
 
 		// Clean breadcrumb colors - selected is turquoise on black, inactive is black on turquoise
@@ -971,7 +932,7 @@ func (v *View) updateBreadcrumbBar(path string) {
 	v.breadcrumbBar.SetCell(1, 0, pathCell)
 
 	// Span the path across all columns
-	for col := 1; col < len(views); col++ {
+	for col := 1; col < len(viewTypes); col++ {
 		v.breadcrumbBar.SetCell(1, col, tview.NewTableCell("").SetSelectable(false))
 	}
 
@@ -983,7 +944,7 @@ func (v *View) updateBreadcrumbBar(path string) {
 	v.breadcrumbBar.SetCell(2, 0, instructionsCell)
 
 	// Span instructions across all columns
-	for col := 1; col < len(views); col++ {
+	for col := 1; col < len(viewTypes); col++ {
 		v.breadcrumbBar.SetCell(2, col, tview.NewTableCell("").SetSelectable(false))
 	}
 
@@ -995,8 +956,8 @@ func (v *View) updateBreadcrumbBar(path string) {
 		switch event.Key() {
 		case tcell.KeyEnter:
 			row, col := v.breadcrumbBar.GetSelection()
-			if row == 0 && col < len(views) {
-				v.switchToView(views[col])
+			if row == 0 && col < len(viewTypes) {
+				v.switchToView(viewTypes[col])
 			}
 			return nil
 		case tcell.KeyLeft:
@@ -1007,7 +968,7 @@ func (v *View) updateBreadcrumbBar(path string) {
 			return nil
 		case tcell.KeyRight:
 			row, col := v.breadcrumbBar.GetSelection()
-			if col < len(views)-1 {
+			if col < len(viewTypes)-1 {
 				v.breadcrumbBar.Select(row, col+1)
 			}
 			return nil
@@ -1038,7 +999,7 @@ func (v *View) switchToView(viewType string) {
 	}
 }
 
-func (v *View) Reinitialize(cfg aws.Config) error {
+func (v *View) Reinitialize(_ aws.Config) error {
 	// For Vault, we don't need AWS config, but we might want to update connection details
 	// This could be extended to support different Vault instances
 	return nil
