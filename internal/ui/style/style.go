@@ -3,8 +3,9 @@ package style
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gdamore/tcell/v2"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 var GruvboxMaterial = struct {

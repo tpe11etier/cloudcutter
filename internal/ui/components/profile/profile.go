@@ -2,12 +2,13 @@ package profile
 
 import (
 	"context"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
-	"gopkg.in/ini.v1"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"gopkg.in/ini.v1"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"

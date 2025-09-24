@@ -68,5 +68,5 @@ func (s *Services) ReinitializeWithConfig(cfg aws.Config, viewName string) error
 	}
 
 	return nil
-	
+
 }

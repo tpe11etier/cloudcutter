@@ -96,14 +96,14 @@ func TestService_Health(t *testing.T) {
 
 func TestService_ListMounts(t *testing.T) {
 	tests := []struct {
-		name            string
-		serverResponse  func(w http.ResponseWriter, r *http.Request)
-		token           string
-		expectError     bool
-		expectedMounts  map[string]*Mount
+		name           string
+		serverResponse func(w http.ResponseWriter, r *http.Request)
+		token          string
+		expectError    bool
+		expectedMounts map[string]*Mount
 	}{
 		{
-			name: "successful mounts listing",
+			name:  "successful mounts listing",
 			token: "test-token",
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "GET", r.Method)
@@ -150,7 +150,7 @@ func TestService_ListMounts(t *testing.T) {
 			},
 		},
 		{
-			name: "unauthorized access",
+			name:  "unauthorized access",
 			token: "invalid-token",
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusForbidden)
@@ -159,7 +159,7 @@ func TestService_ListMounts(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "invalid json response",
+			name:  "invalid json response",
 			token: "test-token",
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("invalid json"))

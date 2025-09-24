@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 )
 
 type FieldCaps struct {

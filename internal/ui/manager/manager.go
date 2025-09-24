@@ -192,7 +192,7 @@ func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
 		"region":   vm.showRegionSelector,
 		"dynamodb": func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewDynamoDB) },
 		"elastic":  func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewElastic) },
-		"vault":   func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewVault) },
+		"vault":    func() (tview.Primitive, error) { return nil, vm.SwitchToView(ViewVault) },
 		"help": func() (tview.Primitive, error) {
 			vm.statusBar.SetText("Help: List of available commands...")
 			return nil, nil

@@ -3,9 +3,10 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"strconv"
 )
 
 func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {

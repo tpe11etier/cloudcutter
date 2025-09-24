@@ -2,9 +2,10 @@ package components
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"time"
 )
 
 type Spinner struct {

@@ -1,9 +1,10 @@
 package elastic_test
 
 import (
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
 	"sync"
 	"testing"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
 )
 
 func TestNewDocEntry(t *testing.T) {

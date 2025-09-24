@@ -281,12 +281,10 @@ func (v *View) setupLayout() {
 	v.content.AddItem(v.leftPanel, 30, 0, true)
 	v.content.AddItem(v.rightPanel, 0, 1, false)
 
-
 	// Add to pages
 	pages := v.manager.Pages()
 	pages.AddPage("vault", v.content, true, true)
 }
-
 
 func (v *View) updateDataTableForSecrets(secrets []*vault.Secret) {
 	v.dataTable.Clear()
@@ -509,7 +507,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 					if typeCell != nil && strings.Contains(typeCell.Text, "Directory") {
 						// Navigate into directory or try to navigate first, fallback to secret modal
 						if pathCell != nil {
-							// For "Secret/Directory", try navigation first, if it fails, show as secret
+							// For "Secret/Directory", try navigation first, if it fails, show as secret with breadcrumbs
 							if strings.Contains(typeCell.Text, "Secret/Directory") {
 								v.tryNavigateOrShowSecret(pathCell.Text)
 							} else {
@@ -517,9 +515,9 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 							}
 						}
 					} else {
-						// Show secret details in modal
+						// Show secret with breadcrumbs (not just modal)
 						if pathCell != nil {
-							v.showSecretModal(pathCell.Text)
+							v.showSecretWithBreadcrumbs(pathCell.Text)
 						}
 					}
 				}
@@ -813,8 +811,8 @@ func (v *View) tryNavigateOrShowSecret(path string) {
 		v.manager.App().QueueUpdateDraw(func() {
 			defer v.hideLoading()
 
-			if err != nil {
-				// If navigation fails, try showing as secret instead WITH breadcrumbs
+			if err != nil || len(secrets) == 0 {
+				// If navigation fails OR returns empty results, try showing as secret instead WITH breadcrumbs
 				v.showSecretWithBreadcrumbs(path)
 				return
 			}

@@ -3,6 +3,7 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"

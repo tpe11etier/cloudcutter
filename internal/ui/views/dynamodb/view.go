@@ -3,6 +3,10 @@ package dynamodb
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/atotto/clipboard"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
@@ -10,9 +14,6 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"sort"
-	"strings"
-	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

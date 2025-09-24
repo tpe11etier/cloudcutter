@@ -2,9 +2,10 @@ package elastic
 
 import (
 	"context"
+	"sync"
+
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"sync"
 )
 
 type State struct {

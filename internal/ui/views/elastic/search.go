@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 	"io"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 )
 
 type searchResult struct {
