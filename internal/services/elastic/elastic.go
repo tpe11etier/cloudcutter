@@ -363,6 +363,25 @@ func formatSize(bytes float64) string {
 	return fmt.Sprintf("%.1f%s", value, units[i])
 }
 
+func (s *Service) IsHealthy(ctx context.Context) error {
+	if s.Client == nil {
+		return fmt.Errorf("elasticsearch client is not initialized")
+	}
+
+	// Perform a simple ping to check connectivity
+	res, err := s.Client.Ping(s.Client.Ping.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("elasticsearch ping failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		return fmt.Errorf("elasticsearch ping returned status code %d", res.StatusCode)
+	}
+
+	return nil
+}
+
 func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

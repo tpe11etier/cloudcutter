@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 	"io"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
 )
 
 type searchResult struct {
@@ -25,15 +26,14 @@ func (v *View) fetchRegularResults(query map[string]any, numResults int, index s
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		v.state.misc.rateLimit.Wait()
 
-		var buf bytes.Buffer
-		if err := json.NewEncoder(&buf).Encode(query); err != nil {
+		queryJSON, err := json.Marshal(query)
+		if err != nil {
 			return nil, fmt.Errorf("error encoding query: %v", err)
 		}
 
 		res, err := v.service.Client.Search(
 			v.service.Client.Search.WithIndex(index),
-			v.service.Client.Search.WithBody(&buf),
-			v.service.Client.Search.WithScroll(5*time.Minute),
+			v.service.Client.Search.WithBody(bytes.NewReader(queryJSON)),
 		)
 
 		if err != nil {
@@ -101,7 +101,7 @@ func (v *View) fetchLargeResults(query map[string]any, index string) (*searchRes
 
 		res, err := v.service.Client.Search(
 			v.service.Client.Search.WithIndex(index),
-			v.service.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
+			v.service.Client.Search.WithBody(bytes.NewReader(queryJSON)),
 			v.service.Client.Search.WithScroll(time.Duration(5)*time.Minute),
 		)
 		if err != nil {
@@ -275,7 +275,6 @@ func (v *View) executeSearch(query map[string]any) (*elastic.ESSearchResult, err
 			return nil, fmt.Errorf("error decoding response: %v", err)
 		}
 
-		v.manager.Logger().Info("Search executed successfully", "hits", result.Hits.Total.Value, "took", result.Took)
 		return &result, nil
 	}
 
@@ -327,9 +326,6 @@ func (v *View) refreshResults() {
 			return
 		}
 
-		v.manager.Logger().Info("Results refreshed successfully",
-			"totalResults", len(searchResult.entries))
-
 		v.updateFieldsFromResults(searchResult.entries)
 
 		// Update results state
@@ -355,8 +351,9 @@ func (v *View) refreshResults() {
 
 func (v *View) processSearchResults(hits []elastic.ESSearchHit) ([]*DocEntry, error) {
 	results := make([]*DocEntry, 0, len(hits))
+	errorCount := 0
 
-	for _, hit := range hits {
+	for i, hit := range hits {
 		entry, err := NewDocEntry(
 			hit.Source,
 			hit.ID,
@@ -366,9 +363,21 @@ func (v *View) processSearchResults(hits []elastic.ESSearchHit) ([]*DocEntry, er
 			hit.Version,
 		)
 		if err != nil {
+			errorCount++
+			v.manager.Logger().Error("Failed to create DocEntry",
+				"error", err,
+				"hitIndex", i,
+				"hitID", hit.ID)
 			continue
 		}
 		results = append(results, entry)
+	}
+
+	if errorCount > 0 {
+		v.manager.Logger().Warn("Some search results failed to process",
+			"totalHits", len(hits),
+			"successfulResults", len(results),
+			"errors", errorCount)
 	}
 
 	return results, nil
@@ -388,5 +397,6 @@ func (v *View) buildQuery() map[string]any {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))
 		return nil
 	}
+
 	return query
 }
