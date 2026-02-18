@@ -2,13 +2,14 @@ package elastic
 
 import (
 	"fmt"
+	"strconv"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
-	"strconv"
 )
 
 func (v *View) setupLayout() {
@@ -279,7 +280,7 @@ func (v *View) setupLayout() {
 									BaseStyle: types.BaseStyle{
 										Border:      true,
 										BorderColor: tcell.ColorBeige,
-										Title:       "Selected Fields (j↓/k↑ to order)",
+										Title:       "Selected Fields (shift+j/k to reorder)",
 										TitleColor:  style.GruvboxMaterial.Yellow,
 										TextColor:   tcell.ColorBeige,
 									},
@@ -339,6 +340,14 @@ func (v *View) setupLayout() {
 	v.components.selectedList = v.manager.GetPrimitiveByID("selectedList").(*tview.List)
 	v.components.resultsTable = v.manager.GetPrimitiveByID("resultsTable").(*tview.Table)
 	v.components.listsContainer = v.manager.GetPrimitiveByID("listsContainer").(*tview.Flex)
+
+	// Set up input capture for field lists to prevent default tview behavior
+	v.components.fieldList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		return v.handleFieldList(event)
+	})
+	v.components.selectedList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		return v.handleSelectedList(event)
+	})
 
 	v.manager.UpdateViewCommands([]header.ViewCommands{
 		{View: "ctrl+a", Description: "Available Fields"},

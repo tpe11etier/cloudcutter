@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
 	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
@@ -22,7 +23,6 @@ func New(cfg aws.Config, region string) (*Services, error) {
 	}, nil
 }
 
-// TODO - fix error reporting
 func (s *Services) InitializeDynamoDB(cfg aws.Config) error {
 	if s.DynamoDB == nil {
 		s.DynamoDB = dynamodb.NewService(cfg)
@@ -56,5 +56,5 @@ func (s *Services) ReinitializeWithConfig(cfg aws.Config, viewName string) error
 	}
 
 	return nil
-	
+
 }
