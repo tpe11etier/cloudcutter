@@ -43,6 +43,7 @@ func New(statusFn func(string)) (*Authenticator, error) {
 		opalProfiles: opalProfiles,
 	}, nil
 }
+
 func (a *Authenticator) IsAuthenticating() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

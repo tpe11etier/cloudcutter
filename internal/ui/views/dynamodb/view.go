@@ -3,23 +3,24 @@ package dynamodb
 import (
 	"context"
 	"fmt"
-	"github.com/atotto/clipboard"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/atotto/clipboard"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/common"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
 )
 
 var _ views.Reinitializer = (*View)(nil)
@@ -33,6 +34,10 @@ type View struct {
 	dataTable    *tview.Table
 	filterPrompt *components.Prompt
 	layout       tview.Primitive
+
+	// Shared event bus
+	sharedEventBus  *common.EventBus
+	componentMapper *DynamoDBComponentMapper
 
 	state viewState
 	ctx   context.Context
@@ -75,6 +80,31 @@ func NewView(manager *manager.Manager, dynamoService dynamodb.Interface) *View {
 	}
 
 	view.setupLayout()
+
+	// Initialize component mapper (after layout setup so components exist)
+	view.componentMapper = NewDynamoDBComponentMapper(view)
+
+	// Initialize shared event bus
+	logger := common.NewLoggerAdapter(
+		view.manager.Logger().Debug,
+		view.manager.Logger().Info,
+		view.manager.Logger().Error,
+	)
+	errorHandler := common.NewSimpleErrorHandler(view.manager, logger)
+	globalHandler := common.NewDefaultGlobalShortcutHandler()
+
+	view.sharedEventBus = common.NewEventBus(&common.EventBusConfig{
+		View:          view,
+		ErrorHandler:  errorHandler,
+		Logger:        logger,
+		GlobalHandler: globalHandler,
+	})
+
+	// Register dynamodb-specific handlers
+	view.sharedEventBus.RegisterHandler(DataTableComponent, NewDynamoDBDataTableHandler(view))
+	view.sharedEventBus.RegisterHandler(LeftPanelComponent, NewDynamoDBLeftPanelHandler(view))
+	view.sharedEventBus.RegisterHandler(FilterPromptComponent, NewDynamoDBFilterPromptHandler(view))
+
 	view.initializeTableCache()
 	return view
 }
@@ -95,6 +125,23 @@ func (v *View) Show() {
 }
 
 func (v *View) Hide() {}
+
+// ViewInterface implementation methods
+
+// GetManager returns the manager for this view
+func (v *View) GetManager() common.ManagerInterface {
+	return v.manager
+}
+
+// GetComponentMapper returns the component mapper for this view
+func (v *View) GetComponentMapper() common.ComponentMapper {
+	return v.componentMapper
+}
+
+// GetName returns the view name for logging (alias to Name for consistency)
+func (v *View) GetName() string {
+	return v.Name()
+}
 
 func (v *View) fetchTables() {
 	tableNames, err := v.service.ListTables(v.ctx)
@@ -448,59 +495,7 @@ func (v *View) filterLeftPanel(filter string) {
 func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	return func(event *tcell.EventKey) *tcell.EventKey {
 		currentFocus := v.manager.App().GetFocus()
-
-		if event.Key() == tcell.KeyRune {
-			switch event.Rune() {
-			case 'n', 'p':
-				if currentFocus == v.dataTable {
-					if event.Rune() == 'n' {
-						v.nextPage()
-					} else {
-						v.previousPage()
-					}
-					return nil
-				}
-			case '/':
-				switch currentFocus {
-				case v.leftPanel:
-					v.showFilterPrompt(v.leftPanel)
-					return nil
-				case v.dataTable:
-					v.showFilterPrompt(v.dataTable)
-					return nil
-				}
-			case 'r':
-				if currentFocus == v.dataTable {
-					v.toggleRowNumbers()
-					return nil
-				}
-			}
-		}
-
-		switch event.Key() {
-		case tcell.KeyTab:
-			if currentFocus == v.leftPanel {
-				v.manager.SetFocus(v.dataTable)
-			} else {
-				v.manager.SetFocus(v.leftPanel)
-			}
-			return nil
-		case tcell.KeyEnter:
-			if currentFocus == v.dataTable {
-				return v.handleResultsTable(event)
-			}
-		case tcell.KeyBackspace, tcell.KeyBackspace2, tcell.KeyEsc:
-			if currentFocus == v.leftPanel {
-				v.state.leftPanelFilter = ""
-				v.filterLeftPanel("")
-				return nil
-			}
-			if event.Key() == tcell.KeyEsc && currentFocus == v.dataTable {
-				v.manager.SetFocus(v.leftPanel)
-				return nil
-			}
-		}
-		return event
+		return v.sharedEventBus.ProcessEvent(event, currentFocus)
 	}
 }
 
@@ -735,24 +730,6 @@ func (v *View) previousPage() {
 	} else {
 		v.manager.UpdateStatusBar("Already on the first page.")
 	}
-}
-
-func (v *View) handleResultsTable(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		row, _ := v.dataTable.GetSelection()
-		if row > 0 { // Header is row 0
-			// Calculate which item to show based on pagination
-			start := (v.state.currentPage - 1) * v.state.pageSize
-			itemIndex := start + row - 1 // -1 because row 0 is header
-
-			if itemIndex < len(v.state.filteredItems) {
-				v.showItemDetails(v.state.filteredItems[itemIndex])
-			}
-		}
-		return nil
-	}
-	return event
 }
 
 func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {

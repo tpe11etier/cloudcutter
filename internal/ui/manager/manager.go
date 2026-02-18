@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -18,7 +20,6 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"strings"
 )
 
 const (
@@ -984,4 +985,9 @@ func (vm *Manager) reinitializeActiveView() error {
 		return reinit.Reinitialize(vm.awsConfig)
 	}
 	return nil
+}
+
+// Stop stops the application
+func (vm *Manager) Stop() {
+	vm.app.Stop()
 }

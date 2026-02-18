@@ -8,16 +8,33 @@ import (
 
 // RateLimiter handles rate limiting for Elasticsearch requests
 type RateLimiter struct {
-	lastRequest time.Time
-	retryAfter  time.Duration
-	mu          sync.RWMutex
+	lastRequest     time.Time
+	retryAfter      time.Duration
+	initialDelay    time.Duration
+	maxDelay        time.Duration
+	retryMultiplier float64
+	mu              sync.RWMutex
 }
 
 // NewRateLimiter creates a new rate limiter with default settings
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{
-		lastRequest: time.Now(),
-		retryAfter:  time.Millisecond * 100, // Start with 100ms delay
+		lastRequest:     time.Now(),
+		retryAfter:      time.Millisecond * 100, // Default 100ms delay for backward compatibility
+		initialDelay:    time.Millisecond * 100,
+		maxDelay:        5 * time.Second,
+		retryMultiplier: 2.0,
+	}
+}
+
+// NewRateLimiterWithConfig creates a new rate limiter with configuration
+func NewRateLimiterWithConfig(config *RateLimitConfig) *RateLimiter {
+	return &RateLimiter{
+		lastRequest:     time.Now(),
+		retryAfter:      config.InitialRetryDelay,
+		initialDelay:    config.InitialRetryDelay,
+		maxDelay:        config.MaxRetryDelay,
+		retryMultiplier: config.RetryMultiplier,
 	}
 }
 
@@ -39,10 +56,10 @@ func (r *RateLimiter) Wait() {
 func (r *RateLimiter) HandleTooManyRequests() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Exponential backoff with max of 5 seconds
+	// Exponential backoff with configurable max delay
 	r.retryAfter = time.Duration(math.Min(
-		float64(r.retryAfter)*2,
-		float64(5*time.Second),
+		float64(r.retryAfter)*r.retryMultiplier,
+		float64(r.maxDelay),
 	))
 }
 
@@ -50,7 +67,7 @@ func (r *RateLimiter) HandleTooManyRequests() {
 func (r *RateLimiter) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.retryAfter = time.Millisecond * 100
+	r.retryAfter = r.initialDelay
 }
 
 // GetRetryAfter returns current retry delay

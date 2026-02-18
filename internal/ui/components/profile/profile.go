@@ -2,12 +2,14 @@ package profile
 
 import (
 	"context"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
-	"gopkg.in/ini.v1"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"gopkg.in/ini.v1"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
@@ -39,12 +41,14 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 	}
 
 	selector.
+		SetMainTextColor(style.GruvboxMaterial.Foreground).
 		SetSelectedStyle(tcell.StyleDefault.
 			Foreground(tcell.ColorLightYellow).
 			Background(tcell.ColorDarkCyan)).
 		SetBorder(true).
 		SetTitle(" Select Environment ").
 		SetTitleAlign(tview.AlignCenter).
+		SetTitleColor(style.GruvboxMaterial.Foreground).
 		SetBorderColor(tcell.ColorMediumTurquoise)
 
 	// Discover available profiles

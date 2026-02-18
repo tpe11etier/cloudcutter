@@ -226,6 +226,14 @@ func (v *View) rebuildFieldList() {
 			})
 		}
 	}
+
+	// Re-apply the current filter if one is active
+	if v.state.ui.fieldListFilter != "" {
+		v.filterFieldList(v.state.ui.fieldListFilter)
+	} else {
+		// Ensure title is reset when no filter is active
+		v.updateFieldListTitle("", len(discoveredFields))
+	}
 }
 
 func (v *View) toggleField(field string) {
@@ -253,12 +261,26 @@ func (v *View) filterFieldList(filter string) {
 		})
 	}
 
+	// Update the field list title to show filter status
+	v.updateFieldListTitle(filter, len(filteredFields))
+
 	if filter != "" {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Filtered: showing available fields matching '%s' (%d matches)",
 			filter, len(filteredFields)))
 	} else {
 		v.manager.UpdateStatusBar("Showing all available fields")
 	}
+}
+
+// updateFieldListTitle updates the field list title to show filter status
+func (v *View) updateFieldListTitle(filter string, matchCount int) {
+	var title string
+	if filter != "" {
+		title = fmt.Sprintf("Available Fields - Filtered: \"%s\" (%d)", filter, matchCount)
+	} else {
+		title = "Available Fields (Enter to select)"
+	}
+	v.components.fieldList.SetTitle(title)
 }
 
 func (v *View) moveFieldPosition(field string, moveUp bool) {

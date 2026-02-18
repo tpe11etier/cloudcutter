@@ -10,7 +10,7 @@ import (
 	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 )
 
-func TestLoggerTableDriven(t *testing.T) {
+func TestLogger(t *testing.T) {
 	tests := []struct {
 		name       string
 		config     logger.Config

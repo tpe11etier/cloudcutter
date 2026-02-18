@@ -30,6 +30,8 @@ func createTestView(t *testing.T) *View {
 		components: viewComponents{
 			filterPrompt: components.NewPrompt(),
 		},
+		service: nil, // nil for testing
+		layout:  nil, // nil for testing
 		state: State{
 			pagination: PaginationState{
 				currentPage: 1,
@@ -44,10 +46,8 @@ func createTestView(t *testing.T) *View {
 			data: DataState{
 				fieldCache: fieldCache,
 				fieldState: fieldState,
-
 				filters:       []string{},
 				currentFilter: "",
-
 				currentResults:   []*DocEntry{},
 				filteredResults:  []*DocEntry{},
 				displayedResults: []*DocEntry{},
@@ -63,6 +63,7 @@ func createTestView(t *testing.T) *View {
 				visibleRows:       0,
 				lastDisplayHeight: 0,
 				spinner:           nil,
+				rateLimit:         NewRateLimiter(),
 			},
 		},
 	}
@@ -240,9 +241,10 @@ func TestHandleFilterInput(t *testing.T) {
 
 			view.components.filterInput.SetText(tt.inputText)
 
-			// Simulate Enter key press
+			// Simulate Enter key press using test handler system
 			event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-			view.handleFilterInput(event)
+			handler := NewTestFilterInputHandler(view)
+			handler.HandleEvent(event, view)
 
 			view.state.mu.RLock()
 			numFilters := len(view.state.data.filters)
@@ -274,11 +276,13 @@ func TestHandleFieldList_NoPanicIfEmpty(t *testing.T) {
 
 	// Simulate Enter key press for fieldList
 	fieldListEvent := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleFieldList(fieldListEvent)
+	fieldListHandler := NewTestFieldListHandler(view)
+	fieldListHandler.HandleEvent(fieldListEvent, view)
 
 	// Simulate Enter key press for selectedList
 	selectedListEvent := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleSelectedList(selectedListEvent)
+	selectedListHandler := NewTestSelectedListHandler(view)
+	selectedListHandler.HandleEvent(selectedListEvent, view)
 
 }
 
@@ -316,7 +320,8 @@ func TestHandleFieldList_ToggleSelection(t *testing.T) {
 	// Select "status" field
 	view.components.fieldList.SetCurrentItem(0)
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleFieldList(event)
+	fieldListHandler := NewTestFieldListHandler(view)
+	fieldListHandler.HandleEvent(event, view)
 
 	if !view.state.data.fieldState.IsFieldSelected("status") {
 		t.Errorf("expected field 'status' to be selected after toggling, but it's not")
@@ -369,7 +374,8 @@ func TestHandleSelectedList_ToggleBack(t *testing.T) {
 	// Toggle the field back
 	view.components.selectedList.SetCurrentItem(0)
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleSelectedList(event)
+	selectedListHandler := NewTestSelectedListHandler(view)
+	selectedListHandler.HandleEvent(event, view)
 
 	// Verify field was unselected
 	if view.state.data.fieldState.IsFieldSelected("status") {
@@ -466,7 +472,8 @@ func TestAddingMultipleFilters(t *testing.T) {
 	for _, text := range inputs {
 		view.components.filterInput.SetText(text)
 		event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-		view.handleFilterInput(event)
+		handler := NewTestFilterInputHandler(view)
+		handler.HandleEvent(event, view)
 	}
 
 	view.state.mu.RLock()
@@ -491,7 +498,8 @@ func TestTimeframeChange(t *testing.T) {
 
 	// simulate pressing Enter
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleTimeframeInput(event)
+	timeframeHandler := NewTestTimeframeInputHandler(view)
+	timeframeHandler.HandleEvent(event, view)
 
 	if view.state.search.timeframe != newTimeframe {
 		t.Errorf("expected timeframe to be %q, but got %q",
@@ -506,6 +514,7 @@ func TestNoPanicWhenRefreshIsNil(t *testing.T) {
 
 	// Enter key on timeframeInput
 	event := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
-	view.handleTimeframeInput(event)
+	timeframeHandler := NewTestTimeframeInputHandler(view)
+	timeframeHandler.HandleEvent(event, view)
 
 }

@@ -222,6 +222,19 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
+		case 'j': // Navigate down
+			currentIndex := v.components.fieldList.GetCurrentItem()
+			maxIndex := v.components.fieldList.GetItemCount() - 1
+			if currentIndex < maxIndex {
+				v.components.fieldList.SetCurrentItem(currentIndex + 1)
+			}
+			return nil
+		case 'k': // Navigate up
+			currentIndex := v.components.fieldList.GetCurrentItem()
+			if currentIndex > 0 {
+				v.components.fieldList.SetCurrentItem(currentIndex - 1)
+			}
+			return nil
 		case 's':
 			v.manager.SetFocus(v.components.selectedList)
 		}
@@ -250,18 +263,31 @@ func (v *View) handleSelectedList(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
-		case 'k': // Move up
-			index := v.components.selectedList.GetCurrentItem()
-			if index >= 0 && index < v.components.selectedList.GetItemCount() {
-				mainText, _ := v.components.selectedList.GetItemText(index)
-				v.moveFieldPosition(mainText, true)
+		case 'j': // Navigate down
+			currentIndex := v.components.selectedList.GetCurrentItem()
+			maxIndex := v.components.selectedList.GetItemCount() - 1
+			if currentIndex < maxIndex {
+				v.components.selectedList.SetCurrentItem(currentIndex + 1)
 			}
 			return nil
-		case 'j': // Move down
+		case 'k': // Navigate up
+			currentIndex := v.components.selectedList.GetCurrentItem()
+			if currentIndex > 0 {
+				v.components.selectedList.SetCurrentItem(currentIndex - 1)
+			}
+			return nil
+		case 'J': // Reorder down (move field down in order)
 			index := v.components.selectedList.GetCurrentItem()
 			if index >= 0 && index < v.components.selectedList.GetItemCount() {
 				mainText, _ := v.components.selectedList.GetItemText(index)
 				v.moveFieldPosition(mainText, false)
+			}
+			return nil
+		case 'K': // Reorder up (move field up in order)
+			index := v.components.selectedList.GetCurrentItem()
+			if index >= 0 && index < v.components.selectedList.GetItemCount() {
+				mainText, _ := v.components.selectedList.GetItemText(index)
+				v.moveFieldPosition(mainText, true)
 			}
 			return nil
 		case 'a':

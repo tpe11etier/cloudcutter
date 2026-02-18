@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-	"log"
-	"os"
-	"strings"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpelletiersophos/cloudcutter/internal/services"

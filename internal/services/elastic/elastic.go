@@ -7,14 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/viper"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/spf13/viper"
+	"github.com/tpelletiersophos/cloudcutter/internal/logger"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -184,69 +185,6 @@ func hashPayload(b []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-//func (s *Service) SearchDocuments(ctx context.Context, index string, query map[string]any) ([]map[string]any, int, error) {
-//	if s.Client == nil {
-//		s.log.Debug("SearchDocuments called in no-op mode")
-//		return []map[string]any{}, 0, nil
-//	}
-//
-//	s.log.Debug("Searching index %s with query: %v", index, query)
-//	queryJSON, err := json.Marshal(query)
-//	if err != nil {
-//		return nil, 0, fmt.Errorf("failed to marshal query: %w", err)
-//	}
-//
-//	res, err := s.Client.Search(
-//		s.Client.Search.WithContext(ctx),
-//		s.Client.Search.WithIndex(index),
-//		s.Client.Search.WithBody(strings.NewReader(string(queryJSON))),
-//	)
-//	if err != nil {
-//		s.log.Error("Search request failed: %v", err)
-//		return nil, 0, fmt.Errorf("search request failed: %w", err)
-//	}
-//	defer res.Body.Close()
-//
-//	var result struct {
-//		Hits struct {
-//			Total struct {
-//				Value    int    `json:"value"`
-//				Relation string `json:"relation"`
-//			} `json:"total"`
-//			Hits []struct {
-//				Source json.RawMessage `json:"_source"`
-//			} `json:"hits"`
-//		} `json:"hits"`
-//	}
-//
-//	//var result struct {
-//	//	Hits struct {
-//	//		Total int `json:"total"`
-//	//		Hits  []struct {
-//	//			Source json.RawMessage `json:"_source"`
-//	//		} `json:"hits"`
-//	//	} `json:"hits"`
-//	//}
-//
-//	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-//		s.log.Error("Failed to decode search response: %v", err)
-//		return nil, 0, fmt.Errorf("decoding response failed: %w", err)
-//	}
-//
-//	docs := make([]map[string]any, 0, len(result.Hits.Hits))
-//	for i, hit := range result.Hits.Hits {
-//		var doc map[string]any
-//		if err := json.Unmarshal(hit.Source, &doc); err != nil {
-//			s.log.Warn("Failed to unmarshal document %d: %v", i, err)
-//			continue
-//		}
-//		docs = append(docs, doc)
-//	}
-//
-//	s.log.Debug("Search returned %d documents", len(docs))
-//	return docs, result.Hits.Total.Value, nil
-//}
-
 func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, error) {
 	if s.Client == nil {
 		s.log.Debug("ListIndices called in no-op mode")
@@ -363,25 +301,6 @@ func formatSize(bytes float64) string {
 	return fmt.Sprintf("%.1f%s", value, units[i])
 }
 
-func (s *Service) IsHealthy(ctx context.Context) error {
-	if s.Client == nil {
-		return fmt.Errorf("elasticsearch client is not initialized")
-	}
-
-	// Perform a simple ping to check connectivity
-	res, err := s.Client.Ping(s.Client.Ping.WithContext(ctx))
-	if err != nil {
-		return fmt.Errorf("elasticsearch ping failed: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		return fmt.Errorf("elasticsearch ping returned status code %d", res.StatusCode)
-	}
-
-	return nil
-}
-
 func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -452,12 +371,12 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 					total.Health = "red"
 				}
 
-				// sum up docs
+				// sum docs
 				if docs, err := strconv.ParseInt(stat.DocsCount, 10, 64); err == nil {
 					totalDocs += docs
 				}
 
-				// Sum up size
+				// sum size
 				if size, _ := parseSize(stat.StoreSize); size > 0 {
 					totalSize += size
 				}
@@ -477,68 +396,3 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) GetIndexStats(ctx context.Context, indexPattern string) (*IndexStats, error) {
-	if s.Client == nil {
-		s.log.Debug("GetIndexStats called in no-op mode")
-		return &IndexStats{
-			Health: "unknown",
-			Status: "unknown",
-			Index:  indexPattern,
-		}, nil
-	}
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	s.log.Debug("Getting stats for index pattern: %s", indexPattern)
-
-	// try exact match first
-	if stats, ok := s.cache[indexPattern]; ok {
-		return stats, nil
-	}
-
-	if strings.Contains(indexPattern, "*") {
-		pattern := strings.TrimSuffix(indexPattern, "*")
-
-		var matchingStats []*IndexStats
-		for indexName, stats := range s.cache {
-			if strings.HasPrefix(indexName, pattern) && !strings.Contains(indexName, "*") {
-				matchingStats = append(matchingStats, stats)
-			}
-		}
-
-		if len(matchingStats) > 0 {
-			total := &IndexStats{
-				Health: "green",
-				Status: "open",
-				Index:  indexPattern,
-			}
-
-			var totalDocs int64
-			var totalSize float64
-
-			for _, stat := range matchingStats {
-				if stat.Health == "yellow" && total.Health == "green" {
-					total.Health = "yellow"
-				} else if stat.Health == "red" {
-					total.Health = "red"
-				}
-
-				if docs, err := strconv.ParseInt(stat.DocsCount, 10, 64); err == nil {
-					totalDocs += docs
-				}
-
-				if size, _ := parseSize(stat.StoreSize); size > 0 {
-					totalSize += size
-				}
-			}
-
-			total.DocsCount = strconv.FormatInt(totalDocs, 10)
-			total.StoreSize = formatSize(totalSize)
-
-			return total, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no stats found for index: %s", indexPattern)
-}

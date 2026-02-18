@@ -45,6 +45,10 @@ func BuildQueryWithTime(filters []string, size int, timeframe string, now time.T
 		}
 		if timeQuery != nil {
 			mustClauses = append(mustClauses, timeQuery)
+			// Log success to help debug
+		} else {
+			// This should never happen - log error
+			return nil, fmt.Errorf("BuildTimeQuery returned nil for timeframe='%s'", timeframe)
 		}
 	}
 
@@ -299,7 +303,7 @@ func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, er
 	}
 
 	unixTime := now.Unix()
-	unixTimeMs := now.UnixMilli()
+	unixMilliTime := now.UnixMilli()
 
 	return map[string]interface{}{
 		"bool": map[string]interface{}{
@@ -315,8 +319,8 @@ func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, er
 				{
 					"range": map[string]interface{}{
 						"detectionGeneratedTime": map[string]interface{}{
-							"gte": unixTimeMs - int64(duration.Milliseconds()),
-							"lte": unixTimeMs,
+							"gte": unixMilliTime - int64(duration.Milliseconds()),
+							"lte": unixMilliTime,
 						},
 					},
 				},
