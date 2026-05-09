@@ -29,8 +29,8 @@ func sampleConfig() *config.Config {
 				Name: "dragos",
 				Auth: config.AuthSpec{Type: "jwt", Path: "/tmp/x.token"},
 				Transport: config.TransportSpec{
-					Type:    "kibana_proxy",
-					BaseURL: "https://platform.dragos.cloud",
+					Type:      "kibana_proxy",
+					BaseURL:   "https://platform.dragos.cloud",
 					ProxyPath: "/kibana/api/console/proxy",
 					TokenHeader: &config.TokenHeaderSpec{
 						Name:   "Cookie",
