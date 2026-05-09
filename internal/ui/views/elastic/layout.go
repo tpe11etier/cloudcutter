@@ -270,6 +270,14 @@ func (v *View) setupLayout() {
 									OnBlur: func(list *tview.List) {
 										list.SetBorderColor(tcell.ColorBeige)
 									},
+									OnChanged: func(_ int, mainText string, _ string, _ rune) {
+										// Long field names are clipped to the panel
+										// width; mirror the focused name to the status
+										// bar so the full value is always visible.
+										if mainText != "" {
+											v.manager.UpdateStatusBar(mainText)
+										}
+									},
 								},
 							},
 							{
@@ -293,6 +301,11 @@ func (v *View) setupLayout() {
 									},
 									OnBlur: func(list *tview.List) {
 										list.SetBorderColor(tcell.ColorBeige)
+									},
+									OnChanged: func(_ int, mainText string, _ string, _ rune) {
+										if mainText != "" {
+											v.manager.UpdateStatusBar(mainText)
+										}
 									},
 								},
 							},

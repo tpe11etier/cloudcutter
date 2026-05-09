@@ -116,9 +116,17 @@ func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) 
 		return nil, &ParseError{Field: "", Message: "empty filter"}
 	}
 
-	// Handle special case for _id field
+	// _id supports wildcards (`*`, `?`). The `ids` query is exact-match
+	// only, so route wildcard values through `wildcard` instead.
 	if strings.HasPrefix(filter, "_id=") {
 		value := strings.TrimSpace(strings.TrimPrefix(filter, "_id="))
+		if strings.ContainsAny(value, "*?") {
+			return map[string]any{
+				"wildcard": map[string]any{
+					"_id": map[string]any{"value": value},
+				},
+			}, nil
+		}
 		return map[string]any{
 			"ids": map[string]any{
 				"values": []string{value},

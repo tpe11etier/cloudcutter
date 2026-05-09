@@ -610,6 +610,7 @@ func (vm *Manager) switchToDevProfile() error {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "opal_dev")
+		vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
 
 		if err := vm.reinitializeActiveView(); err != nil {
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
@@ -643,6 +644,7 @@ func (vm *Manager) switchToLocalProfile() error {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", "local")
+		vm.header.UpdateEnvVar("Region", "local")
 
 		if err := vm.reinitializeActiveView(); err != nil {
 			vm.logger.Error("Error reinitializing active view", "error", err)
@@ -924,6 +926,7 @@ func (vm *Manager) switchToProdProfile() error {
 		vm.app.QueueUpdateDraw(func() {
 			vm.awsConfig = cfg
 			vm.header.UpdateEnvVar("Profile", "opal_prod")
+			vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
 			vm.showLoading("Loading Available Fields...")
 		})
 
@@ -961,6 +964,7 @@ func (vm *Manager) switchToStandardProfile(profile string) {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", profile)
+		vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
 
 		if err := vm.reinitializeViews(); err != nil {
 			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
@@ -1015,6 +1019,7 @@ func (vm *Manager) switchToDragosProfile() {
 
 		vm.awsConfig = cfg
 		vm.header.UpdateEnvVar("Profile", auth.DragosProfile)
+		vm.header.UpdateEnvVar("Region", "—")
 
 		if err := vm.reinitializeViews(); err != nil {
 			// Reinit error on dragos almost always means the saved token is

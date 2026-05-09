@@ -64,11 +64,20 @@ func (v *View) displayCurrentPage() {
 		return
 	}
 
-	// Calculate page bounds
+	// Calculate page bounds. If the displayed result set shrank under us
+	// (e.g. local filter applied while we were on a later page), clamp
+	// currentPage back into range AND write it back so the header stops
+	// reporting things like "4/1".
 	start := (currentPage - 1) * pageSize
 	if start >= totalResults {
 		currentPage = (totalResults + pageSize - 1) / pageSize
+		if currentPage < 1 {
+			currentPage = 1
+		}
 		start = (currentPage - 1) * pageSize
+		v.state.mu.Lock()
+		v.state.pagination.currentPage = currentPage
+		v.state.mu.Unlock()
 	}
 	end := start + pageSize
 	if end > totalResults {
