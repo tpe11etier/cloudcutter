@@ -7,9 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/tpe11etier/cloudcutter/internal/config"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
 	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 
@@ -41,6 +42,18 @@ func init() {
 }
 
 func runApplication() {
+	if path := config.DefaultConfigPath(); path != "" {
+		wrote, err := config.EnsureExists(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cloudcutter: %v\n", err)
+			os.Exit(1)
+		}
+		if wrote {
+			fmt.Fprintf(os.Stderr, "wrote starter config to %s — edit it and run cloudcutter again\n", path)
+			os.Exit(0)
+		}
+	}
+
 	ctx := context.Background()
 	app := ui.NewApp()
 
@@ -60,7 +73,7 @@ func runApplication() {
 	}
 	defer logInstance.Close()
 
-	defaultConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+	defaultConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion("us-west-2"))
 	if err != nil {
 		logInstance.Error("Failed to load default config", "error", err)
 		defaultConfig = awssdk.Config{}
