@@ -16,7 +16,22 @@ type Session struct {
 	Config  aws.Config
 	Profile string
 	Region  string
+	// Dragos is populated only when Profile == DragosProfile.
+	Dragos *DragosSession
 }
+
+// DragosSession carries the state needed to talk to the Dragos Kibana endpoint.
+// It is intentionally separate from aws.Config because the auth model has
+// nothing in common with AWS SigV4.
+type DragosSession struct {
+	BaseURL      string
+	AuthToken    string
+	IndexPattern string
+	KbnVersion   string
+}
+
+// DragosProfile is the profile name selected from the picker to use Dragos.
+const DragosProfile = "dragos"
 
 type Authenticator struct {
 	mu               sync.RWMutex
@@ -84,25 +99,41 @@ func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region strin
 	}
 
 	a.sendStatus(fmt.Sprintf("Switching to profile %s in %s", profile, region))
-	var cfg aws.Config
-	var err error
-
-	if roleID, isOpal := a.opalProfiles[profile]; isOpal {
-		cfg, err = a.authenticateOpal(ctx, profile, region, roleID)
-	} else if profile == "local" {
-		cfg, err = a.authenticateLocal(ctx, region)
-	} else {
-		cfg, err = a.authenticateStandard(ctx, profile, region)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("authentication failed: %w", err)
-	}
 
 	session := &Session{
-		Config:  cfg,
 		Profile: profile,
 		Region:  region,
+	}
+
+	switch {
+	case profile == DragosProfile:
+		cfg, dragos, err := a.authenticateDragos(ctx, region)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+		session.Config = cfg
+		session.Dragos = dragos
+
+	case a.opalProfiles[profile] != "":
+		cfg, err := a.authenticateOpal(ctx, profile, region, a.opalProfiles[profile])
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+		session.Config = cfg
+
+	case profile == "local":
+		cfg, err := a.authenticateLocal(ctx, region)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+		session.Config = cfg
+
+	default:
+		cfg, err := a.authenticateStandard(ctx, profile, region)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+		session.Config = cfg
 	}
 
 	a.mu.Lock()
@@ -152,6 +183,20 @@ func (a *Authenticator) runOpalCommand(ctx context.Context, roleID, profileName 
 
 	a.sendStatus("Opal authentication completed successfully")
 	return nil
+}
+
+func (a *Authenticator) authenticateDragos(ctx context.Context, region string) (aws.Config, *DragosSession, error) {
+	cfg, err := LoadDragosConfig()
+	if err != nil {
+		return aws.Config{}, nil, err
+	}
+	a.sendStatus(fmt.Sprintf("Using Dragos token at %s", cfg.BaseURL))
+	return aws.Config{Region: region}, &DragosSession{
+		BaseURL:      cfg.BaseURL,
+		AuthToken:    cfg.AuthToken,
+		IndexPattern: cfg.IndexPattern,
+		KbnVersion:   cfg.KbnVersion,
+	}, nil
 }
 
 func (a *Authenticator) authenticateLocal(ctx context.Context, region string) (aws.Config, error) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
 )
 
 type searchResult struct {
@@ -65,7 +65,16 @@ func (v *View) fetchRegularResults(query map[string]any, numResults int, index s
 
 		var result elastic.ESSearchResult
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
-			return nil, fmt.Errorf("error decoding response: %v", err)
+			snippet := string(bodyBytes)
+			if len(snippet) > 1024 {
+				snippet = snippet[:1024] + "...(truncated)"
+			}
+			v.manager.Logger().Error("Search response decode failure",
+				"status", res.StatusCode,
+				"content_type", res.Header.Get("Content-Type"),
+				"body", snippet,
+			)
+			return nil, fmt.Errorf("error decoding response (status %d, content-type %s): %v — body logged", res.StatusCode, res.Header.Get("Content-Type"), err)
 		}
 
 		entries, err := v.processSearchResults(result.Hits.Hits)
@@ -391,7 +400,12 @@ func (v *View) buildQuery() map[string]any {
 	numResults := v.state.search.numResults
 	v.state.mu.RUnlock()
 
-	query, err := BuildQuery(filters, numResults, timeframe, v.state.data.fieldCache)
+	timeFields := DefaultTimeFields
+	if session := v.manager.CurrentSession(); session != nil && session.Dragos != nil {
+		timeFields = DragosTimeFields
+	}
+
+	query, err := BuildQueryWithTimeAndFields(filters, numResults, timeframe, time.Now(), v.state.data.fieldCache, timeFields)
 	if err != nil {
 		v.manager.Logger().Error("Error building query", "error", err)
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error building query: %v", err))

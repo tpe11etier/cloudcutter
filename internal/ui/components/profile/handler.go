@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/tpelletiersophos/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
 )
 
 type Handler struct {
@@ -71,6 +71,13 @@ func (ph *Handler) GetCurrentProfile() string {
 		return session.Profile
 	}
 	return ""
+}
+
+// CurrentSession returns the active auth session (or nil if not yet
+// authenticated). Used by views that need richer per-profile state than the
+// SwitchProfile callback exposes — notably the Dragos token/base URL.
+func (ph *Handler) CurrentSession() *auth.Session {
+	return ph.auth.Current()
 }
 
 func (ph *Handler) IsAuthenticating() bool {

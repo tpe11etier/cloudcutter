@@ -1,9 +1,9 @@
 package common
 
 import (
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common/errors"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common/events"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common/errors"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common/events"
 )
 
 // SystemsFactory creates common systems without import cycles

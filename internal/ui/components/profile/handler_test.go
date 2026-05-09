@@ -8,7 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
-	"github.com/tpelletiersophos/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
 )
 
 func TestNewProfileHandler(t *testing.T) {

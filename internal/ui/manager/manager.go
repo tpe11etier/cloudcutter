@@ -2,24 +2,27 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/profile"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/region"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/header"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/profile"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/region"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/help"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 )
 
 const (
@@ -57,6 +60,25 @@ type Manager struct {
 
 func (vm *Manager) GetCurrentConfig() aws.Config {
 	return vm.awsConfig
+}
+
+// CurrentSession returns the active auth session (nil before first profile
+// switch). Lets views read profile-specific state — e.g. the Dragos JWT/base
+// URL that doesn't fit into aws.Config.
+func (vm *Manager) CurrentSession() *auth.Session {
+	if vm.profileHandler == nil {
+		return nil
+	}
+	return vm.profileHandler.CurrentSession()
+}
+
+// focusActiveView focuses the active view's content if there is one. No-op
+// before the first profile is selected (when activeView is nil).
+func (vm *Manager) focusActiveView() {
+	if vm.activeView == nil {
+		return
+	}
+	vm.app.SetFocus(vm.activeView.Content())
 }
 
 func (vm *Manager) Pages() *tview.Pages {
@@ -169,7 +191,7 @@ func (vm *Manager) showModal(name string, content tview.Primitive, width int, he
 func (vm *Manager) HideModal(name string) {
 	vm.pages.RemovePage(name)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -476,7 +498,7 @@ func (vm *Manager) ViewContext() context.Context {
 
 func (vm *Manager) hidePrompt() {
 	vm.pages.RemovePage(types.ModalCmdPrompt)
-	vm.app.SetFocus(vm.activeView.Content())
+	vm.focusActiveView()
 }
 
 func (vm *Manager) SetFocus(p tview.Primitive) {
@@ -513,7 +535,9 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyEsc {
 		if vm.pages.HasPage(types.ModalCmdPrompt) {
 			vm.pages.RemovePage(types.ModalCmdPrompt)
-			vm.app.SetFocus(vm.activeView.Content())
+			if vm.activeView != nil {
+				vm.focusActiveView()
+			}
 			return nil
 		}
 		if vm.pages.HasPage(types.ModalFilter) {
@@ -578,7 +602,7 @@ func (vm *Manager) switchToDevProfile() error {
 	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
 		vm.StatusChan <- status
-		return fmt.Errorf(status)
+		return errors.New(status)
 	}
 
 	vm.profileHandler.SwitchProfile(vm.ctx, "opal_dev", func(cfg aws.Config, err error) {
@@ -609,7 +633,7 @@ func (vm *Manager) switchToLocalProfile() error {
 	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
 		vm.StatusChan <- status
-		return fmt.Errorf(status)
+		return errors.New(status)
 	}
 
 	vm.logger.Info("Starting local profile switch")
@@ -657,8 +681,9 @@ func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
 		func(profile string) {
+			vm.logger.Info("Profile picker selected", "profile", profile, "dragosProfile", auth.DragosProfile)
 			if vm.activeView != nil {
-				vm.app.SetFocus(vm.activeView.Content())
+				vm.focusActiveView()
 			}
 
 			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
@@ -669,13 +694,17 @@ func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 				vm.switchToProdProfile()
 			case "local":
 				vm.switchToLocalProfile()
+			case auth.DragosProfile:
+				vm.switchToDragosProfile()
 			default:
 				vm.switchToStandardProfile(profile)
 			}
 		},
 		func() {
 			vm.pages.RemovePage("profileSelector")
-			vm.app.SetFocus(vm.activeView.Content())
+			if vm.activeView != nil {
+				vm.focusActiveView()
+			}
 		},
 		vm.statusBar,
 		vm,
@@ -687,14 +716,14 @@ func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 func (vm *Manager) hideProfileSelector() {
 	vm.pages.RemovePage("profileSelector")
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
 func (vm *Manager) hideHelp() {
 	vm.pages.RemovePage(help.ModalHelp)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -765,7 +794,7 @@ func (vm *Manager) CurrentProfile() string {
 func (vm *Manager) HideFilterPrompt() {
 	vm.pages.RemovePage(types.ModalFilter)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -796,7 +825,7 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 		func(region string) {
 			// Hide first
 			vm.pages.RemovePage("regionSelector")
-			vm.app.SetFocus(vm.activeView.Content())
+			vm.focusActiveView()
 
 			// Then do the update
 			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
@@ -808,7 +837,7 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 		},
 		func() {
 			vm.pages.RemovePage("regionSelector")
-			vm.app.SetFocus(vm.activeView.Content())
+			vm.focusActiveView()
 		},
 		vm.statusBar,
 		vm,
@@ -820,7 +849,7 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 func (vm *Manager) hideRegionSelector() {
 	vm.pages.RemovePage("regionSelector")
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -890,7 +919,7 @@ func (vm *Manager) switchToProdProfile() error {
 	if vm.profileHandler.IsAuthenticating() {
 		status := "Authentication already in progress"
 		vm.StatusChan <- status
-		return fmt.Errorf(status)
+		return errors.New(status)
 	}
 
 	vm.hideProfileSelector()
@@ -975,6 +1004,214 @@ func (vm *Manager) switchToStandardProfile(profile string) {
 
 		vm.StatusChan <- fmt.Sprintf("Successfully switched to profile %s", profile)
 	})
+}
+
+// switchToDragosProfile authenticates the dragos profile. If no token is
+// resolvable (or the existing one fails the probe), pops the login modal so
+// the user can sign in with username + password.
+func (vm *Manager) switchToDragosProfile() {
+	vm.logger.Info("switchToDragosProfile called")
+	vm.statusBar.SetText("switchToDragosProfile: entered")
+	if vm.profileHandler.IsAuthenticating() {
+		vm.StatusChan <- "Authentication already in progress"
+		return
+	}
+
+	// If we don't have any token at all, prompt before even attempting auth.
+	// Standard profiles get the picker removed by profileHandler.SwitchProfile's
+	// onLoadStart callback; we don't go through that path when prompting, so
+	// remove it explicitly here or the selector hides our modal.
+	if _, err := auth.LoadDragosConfig(); err != nil {
+		vm.logger.Info("Dragos token not resolved; showing login modal", "reason", err.Error())
+		vm.pages.RemovePage("profileSelector")
+		vm.statusBar.SetText("Dragos: please log in")
+		vm.ShowDragosLoginModal(
+			func() { vm.switchToDragosProfile() },
+			func() { vm.StatusChan <- "Dragos auth canceled" },
+		)
+		return
+	}
+	vm.logger.Info("Dragos token resolved from config; proceeding with auth")
+
+	vm.profileHandler.SwitchProfile(vm.ctx, auth.DragosProfile, func(cfg aws.Config, err error) {
+		if err != nil {
+			// Most likely cause: token expired or rejected by the gateway.
+			// Pop the login modal so the user can sign in again without
+			// re-navigating through the profile picker.
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Dragos auth failed: %v", err))
+				vm.ShowDragosLoginModal(
+					func() { vm.switchToDragosProfile() },
+					func() { vm.StatusChan <- "Dragos auth canceled" },
+				)
+			})
+			return
+		}
+
+		vm.awsConfig = cfg
+		vm.header.UpdateEnvVar("Profile", auth.DragosProfile)
+
+		if err := vm.reinitializeViews(); err != nil {
+			// Reinit error on dragos almost always means the saved token is
+			// stale — the gateway accepts our cookie at login but rejects it
+			// later, or the proxy returns SPA-fallback HTML. Pop the login
+			// modal so the user can sign in fresh instead of just seeing an
+			// opaque status-bar error.
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Dragos session expired: %v", err))
+				vm.ShowDragosLoginModal(
+					func() { vm.switchToDragosProfile() },
+					func() { vm.StatusChan <- "Dragos auth canceled" },
+				)
+			})
+			return
+		}
+		if err := vm.SwitchToView(ViewElastic); err != nil {
+			vm.Logger().Error("Failed to switch to Elastic after dragos profile", "error", err)
+		}
+		vm.StatusChan <- "Successfully switched to dragos profile"
+	})
+}
+
+// ShowDragosLoginModal opens a username/password form. On submit, it POSTs to
+// /auth/api/v1/login/password, persists the resulting JWT to dragos.json, and
+// calls onSuccess. Esc calls onCancel.
+func (vm *Manager) ShowDragosLoginModal(onSuccess func(), onCancel func()) {
+	const pageName = "dragosLogin"
+
+	// Pull current base/provider from config so a future user with a custom
+	// dragos.json (different host or IDP) doesn't get a hardcoded value.
+	cfg, _ := auth.LoadDragosConfig()
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = auth.DefaultDragosBaseURL
+	}
+	if cfg.ProviderID == "" {
+		cfg.ProviderID = auth.DefaultDragosProviderID
+	}
+
+	form := tview.NewForm()
+	form.SetBorder(true)
+	form.SetTitle(fmt.Sprintf(" Dragos Login — %s (Tab to move, Enter to submit, Esc to cancel) ", cfg.BaseURL))
+	form.SetTitleAlign(tview.AlignLeft)
+	form.SetTitleColor(style.GruvboxMaterial.Yellow)
+	form.SetBorderColor(tcell.ColorMediumTurquoise)
+	form.SetFieldBackgroundColor(tcell.ColorBlack)
+	form.SetFieldTextColor(tcell.ColorBeige)
+	form.SetButtonBackgroundColor(tcell.ColorDarkCyan)
+	form.SetButtonTextColor(tcell.ColorBeige)
+
+	form.AddInputField("Username", "", 40, nil, nil)
+	form.AddPasswordField("Password", "", 40, '*', nil)
+
+	closeModal := func() { vm.pages.RemovePage(pageName) }
+
+	submit := func() {
+		vm.logger.Info("submit: enter")
+		username := strings.TrimSpace(form.GetFormItemByLabel("Username").(*tview.InputField).GetText())
+		password := form.GetFormItemByLabel("Password").(*tview.InputField).GetText()
+		vm.logger.Info("submit: read fields", "user_len", len(username), "pw_len", len(password))
+		if username == "" || password == "" {
+			vm.statusBar.SetText("Username and password are required")
+			return
+		}
+
+		vm.logger.Info("submit: launching goroutine", "url", cfg.BaseURL)
+		vm.statusBar.SetText("Authenticating with Dragos...")
+
+		go func() {
+			vm.logger.Info("submit goroutine: STARTED")
+			heartbeatStop := make(chan struct{})
+			go func() {
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				for i := 0; ; i++ {
+					select {
+					case <-heartbeatStop:
+						vm.logger.Info("submit heartbeat: stopped")
+						return
+					case <-ticker.C:
+						vm.logger.Info("submit heartbeat", "tick", i+1)
+					}
+				}
+			}()
+
+			vm.logger.Info("submit goroutine: calling LoginWithPassword")
+			token, err := auth.LoginWithPassword(vm.ctx, cfg.BaseURL, cfg.ProviderID, username, password)
+			close(heartbeatStop)
+			vm.logger.Info("submit goroutine: LoginWithPassword returned", "err", fmt.Sprintf("%v", err), "token_len", len(token))
+
+			vm.app.QueueUpdateDraw(func() {
+				vm.logger.Info("QUD: running", "err", fmt.Sprintf("%v", err))
+				if err != nil {
+					vm.statusBar.SetText(fmt.Sprintf("Login failed: %v", err))
+					vm.logger.Info("QUD: error path done", "err", fmt.Sprintf("%v", err))
+					return
+				}
+				vm.logger.Info("QUD: about to save token")
+				if err := auth.SaveDragosToken(token); err != nil {
+					vm.statusBar.SetText(fmt.Sprintf("Login OK but couldn't save token: %v", err))
+					vm.logger.Info("QUD: save error done")
+					return
+				}
+				vm.logger.Info("QUD: closeModal")
+				closeModal()
+				vm.logger.Info("QUD: SetText success")
+				vm.statusBar.SetText("Dragos login successful")
+				vm.logger.Info("QUD: about to call onSuccess")
+				if onSuccess != nil {
+					onSuccess()
+				}
+				vm.logger.Info("QUD: onSuccess returned")
+			})
+			vm.logger.Info("submit goroutine: QueueUpdateDraw returned, exiting")
+		}()
+		vm.logger.Info("submit: returned (goroutine running)")
+	}
+
+	form.AddButton("Login", submit)
+	form.AddButton("Cancel", func() {
+		closeModal()
+		if onCancel != nil {
+			onCancel()
+		}
+	})
+	form.SetCancelFunc(func() {
+		closeModal()
+		if onCancel != nil {
+			onCancel()
+		}
+	})
+
+	// Submit when Enter is pressed while focus is on either text field —
+	// tview's default is "move to next field," but for a 2-field login form
+	// it's nicer to just submit on Enter from the password field.
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() != tcell.KeyEnter {
+			return event
+		}
+		// If the focus is on a button, let the form handle Enter normally
+		// (the button's selected handler runs).
+		_, btnIdx := form.GetFocusedItemIndex()
+		if btnIdx >= 0 {
+			return event
+		}
+		// Focus is on Username or Password — submit directly.
+		submit()
+		return nil
+	})
+
+	width, height := 60, 9
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().
+			AddItem(nil, 0, 1, false).
+			AddItem(form, width, 0, true).
+			AddItem(nil, 0, 1, false),
+			height, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	vm.pages.AddPage(pageName, layout, true, true)
+	vm.app.SetFocus(form)
 }
 
 func (vm *Manager) reinitializeActiveView() error {

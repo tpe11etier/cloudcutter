@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
 )
 
 // Mock logger for testing

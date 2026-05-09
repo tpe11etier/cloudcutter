@@ -9,11 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 )
 
 // createTestView creates and initializes the View for testing.

@@ -1,7 +1,7 @@
 package elastic_test
 
 import (
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views/elastic"
 	"sync"
 	"testing"
 )

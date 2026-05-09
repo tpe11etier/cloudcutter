@@ -3,8 +3,8 @@ package elastic
 import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
 )
 
 func (v *View) showFilterPrompt(source tview.Primitive) {

@@ -23,12 +23,11 @@ func NewApp() *App {
 	return app
 }
 
-func (app *App) QueueUpdateDraw(f func()) {
-	app.QueueUpdate(func() {
-		f()
-		app.Draw()
-	})
-}
+// (Custom QueueUpdateDraw removed — it called tview.Application.Draw() inside
+// a queued update, which itself re-enters QueueUpdate and blocks the main loop
+// waiting for a "done" signal that only the main loop can send. Classic
+// self-deadlock. Embedded tview.Application.QueueUpdateDraw uses the private
+// draw() directly and works correctly, so we just fall through to that.)
 
 func (app *App) Suspend(f func()) {
 	app.Suspend(f)

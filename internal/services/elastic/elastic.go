@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"

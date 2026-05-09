@@ -5,9 +5,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 	"strings"
 )
 
@@ -197,9 +197,28 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (v *View) Reinitialize(cfg aws.Config) error {
-	if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
-		return err
+	session := v.manager.CurrentSession()
+	if session != nil && session.Dragos != nil {
+		if err := v.service.ReinitializeDragos(session.Dragos); err != nil {
+			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing Dragos ES service: %v", err))
+			return err
+		}
+		// Reset the index pattern to whatever the Dragos config says (e.g.
+		// `events*`); the user can still type a different one in the index
+		// input afterwards.
+		if pattern := session.Dragos.IndexPattern; pattern != "" {
+			v.state.search.currentIndex = pattern
+			if v.components.indexInput != nil {
+				v.manager.App().QueueUpdateDraw(func() {
+					v.components.indexInput.SetText(pattern)
+				})
+			}
+		}
+	} else {
+		if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
+			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
+			return err
+		}
 	}
 
 	if cfg.Region == "local" {

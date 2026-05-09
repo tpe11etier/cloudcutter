@@ -3,7 +3,7 @@ package elastic
 import (
 	"github.com/rivo/tview"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common"
 )
 
 type ElasticComponentType = common.ComponentType

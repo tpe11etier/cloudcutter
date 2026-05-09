@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
 )
 
 type ManagerInterface interface {

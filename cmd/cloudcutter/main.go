@@ -10,15 +10,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/tpelletiersophos/cloudcutter/internal/services"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
-	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/services"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
+	ddbv "github.com/tpe11etier/cloudcutter/internal/ui/views/dynamodb"
+	elasticView "github.com/tpe11etier/cloudcutter/internal/ui/views/elastic"
 )
 
 var (
@@ -80,11 +80,23 @@ func runApplication() {
 		return ddbv.NewView(viewManager, services.DynamoDB), nil
 	})
 	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
-		currentConfig := viewManager.GetCurrentConfig()
-		if err := services.InitializeElastic(currentConfig); err != nil {
-			return nil, err
+		defaultIndex := "main-summary-*"
+
+		if session := viewManager.CurrentSession(); session != nil && session.Dragos != nil {
+			if err := services.InitializeElasticDragos(session.Dragos); err != nil {
+				return nil, err
+			}
+			if session.Dragos.IndexPattern != "" {
+				defaultIndex = session.Dragos.IndexPattern
+			}
+		} else {
+			currentConfig := viewManager.GetCurrentConfig()
+			if err := services.InitializeElastic(currentConfig); err != nil {
+				return nil, err
+			}
 		}
-		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
+
+		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, defaultIndex)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create elastic view: %w", err)
 		}

@@ -9,7 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common/errors"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common/errors"
 )
 
 // EventManagerConfig contains configuration for enhanced event management
@@ -38,18 +38,18 @@ func NewEventManagerConfig() *EventManagerConfig {
 
 // EventManager provides enhanced event management with logging, middleware, and monitoring
 type EventManager struct {
-	config           *EventManagerConfig
-	middleware       []EventMiddleware
-	interceptors     []EventInterceptor
-	metrics          *EventMetrics
-	logger           errors.Logger
-	mu               sync.RWMutex
+	config       *EventManagerConfig
+	middleware   []EventMiddleware
+	interceptors []EventInterceptor
+	metrics      *EventMetrics
+	logger       errors.Logger
+	mu           sync.RWMutex
 
 	// Pluggable components - each view provides these
-	componentResolver  ComponentResolver
-	actionExecutor     ActionExecutor
-	keyResolver        KeyMappingResolver
-	handlerManager     HandlerManager
+	componentResolver ComponentResolver
+	actionExecutor    ActionExecutor
+	keyResolver       KeyMappingResolver
+	handlerManager    HandlerManager
 }
 
 // NewEventManager creates a new enhanced event manager
@@ -66,9 +66,9 @@ func NewEventManager(
 	}
 
 	em := &EventManager{
-		config:             config,
-		middleware:         make([]EventMiddleware, 0),
-		interceptors:       make([]EventInterceptor, 0),
+		config:            config,
+		middleware:        make([]EventMiddleware, 0),
+		interceptors:      make([]EventInterceptor, 0),
 		logger:            logger,
 		componentResolver: componentResolver,
 		actionExecutor:    actionExecutor,
