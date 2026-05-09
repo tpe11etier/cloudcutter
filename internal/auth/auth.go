@@ -244,7 +244,7 @@ func (a *Authenticator) runPreAuthCommand(ctx context.Context, spec *internalcon
 // is responsible for that — auth itself doesn't pop UIs).
 func loadJWT(spec internalconfig.AuthSpec) (string, error) {
 	if spec.Env != "" {
-		if v := os.Getenv(spec.Env); v != "" {
+		if v := strings.TrimSpace(os.Getenv(spec.Env)); v != "" {
 			return v, nil
 		}
 	}
