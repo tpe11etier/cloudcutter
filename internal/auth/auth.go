@@ -190,7 +190,10 @@ func (a *Authenticator) authenticateDragos(ctx context.Context, region string) (
 	if err != nil {
 		return aws.Config{}, nil, err
 	}
-	a.sendStatus(fmt.Sprintf("Using Dragos token at %s", cfg.BaseURL))
+	a.sendStatus(fmt.Sprintf("Verifying Dragos token at %s", cfg.BaseURL))
+	if err := ProbeDragos(ctx, cfg.BaseURL, cfg.AuthToken, cfg.KbnVersion); err != nil {
+		return aws.Config{}, nil, err
+	}
 	return aws.Config{Region: region}, &DragosSession{
 		BaseURL:      cfg.BaseURL,
 		AuthToken:    cfg.AuthToken,

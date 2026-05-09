@@ -62,10 +62,8 @@ func BuildQueryWithTimeAndFields(filters []string, size int, timeframe string, n
 		return nil, fmt.Errorf("size must be non-negative, got %d", size)
 	}
 
-	// We'll store timeframe + any user filters in mustClauses
 	var mustClauses []map[string]any
 
-	// If timeframe is set, build a timeframe clause
 	if timeframe != "" {
 		timeQuery, err := BuildTimeQueryWithFields(timeframe, now, timeFields)
 		if err != nil {
@@ -73,14 +71,9 @@ func BuildQueryWithTimeAndFields(filters []string, size int, timeframe string, n
 		}
 		if timeQuery != nil {
 			mustClauses = append(mustClauses, timeQuery)
-			// Log success to help debug
-		} else {
-			// This should never happen - log error
-			return nil, fmt.Errorf("BuildTimeQuery returned nil for timeframe='%s'", timeframe)
 		}
 	}
 
-	// Process user filters
 	var parseErrors []string
 	for i, f := range filters {
 		clause, err := ParseFilter(f, fieldCache)
@@ -372,6 +365,10 @@ func BuildTimeQueryWithFields(timeframe string, now time.Time, fields []TimeFiel
 				f.Name: rangeBody,
 			},
 		})
+	}
+
+	if len(should) == 0 {
+		return nil, nil
 	}
 
 	return map[string]interface{}{

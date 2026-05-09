@@ -138,7 +138,10 @@ func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
 		return fmt.Errorf("error reinitializing Elasticsearch client: %s", err)
 	}
 
+	s.mu.Lock()
 	s.Client = newClient
+	s.cache = make(map[string]*IndexStats)
+	s.mu.Unlock()
 	return nil
 }
 
@@ -395,4 +398,3 @@ func (s *Service) PreloadIndexStats(ctx context.Context) error {
 
 	return nil
 }
-

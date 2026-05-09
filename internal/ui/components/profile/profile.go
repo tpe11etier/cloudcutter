@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tpe11etier/cloudcutter/internal/auth"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
 	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 	"gopkg.in/ini.v1"
@@ -84,7 +85,7 @@ func (ps *Selector) switchProfile(profile string) {
 	// would synchronously fail for any user without a token cached, the
 	// picker would show "auth failed" in the status bar, and onSelect would
 	// never fire — so the manager's modal-triggering code would never run.
-	if profile == "dragos" {
+	if profile == auth.DragosProfile {
 		ps.onSelect(profile)
 		return
 	}
@@ -138,8 +139,7 @@ func (ps *Selector) discoverProfiles() []string {
 
 	// add local profile to connect to local Docker instance
 	profileMap["local"] = struct{}{}
-	// add dragos profile (auth via DRAGOS_AUTH_TOKEN or ~/.cloudcutter/dragos.json)
-	profileMap["dragos"] = struct{}{}
+	profileMap[auth.DragosProfile] = struct{}{}
 	// Convert map to sorted slice
 	profiles := make([]string, 0, len(profileMap))
 	for profile := range profileMap {

@@ -203,17 +203,6 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing Dragos ES service: %v", err))
 			return err
 		}
-		// Reset the index pattern to whatever the Dragos config says (e.g.
-		// `events*`); the user can still type a different one in the index
-		// input afterwards.
-		if pattern := session.Dragos.IndexPattern; pattern != "" {
-			v.state.search.currentIndex = pattern
-			if v.components.indexInput != nil {
-				v.manager.App().QueueUpdateDraw(func() {
-					v.components.indexInput.SetText(pattern)
-				})
-			}
-		}
 	} else {
 		if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
 			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
@@ -221,16 +210,27 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 		}
 	}
 
+	v.state.mu.Lock()
+	if session != nil && session.Dragos != nil {
+		if pattern := session.Dragos.IndexPattern; pattern != "" {
+			v.state.search.currentIndex = pattern
+		}
+	}
 	if cfg.Region == "local" {
-		v.components.timeframeInput.SetText("")
 		v.state.search.timeframe = ""
 	}
-
-	v.state.mu.Lock()
-	// Reset field management
 	v.state.data.fieldCache = NewFieldCache()
 	v.state.data.fieldState = NewFieldState(v.state.data.fieldCache)
 	v.state.mu.Unlock()
+
+	v.manager.App().QueueUpdateDraw(func() {
+		if cfg.Region == "local" {
+			v.components.timeframeInput.SetText("")
+		}
+		if session != nil && session.Dragos != nil && session.Dragos.IndexPattern != "" && v.components.indexInput != nil {
+			v.components.indexInput.SetText(session.Dragos.IndexPattern)
+		}
+	})
 
 	v.manager.App().QueueUpdateDraw(func() {
 		v.components.fieldList.Clear()

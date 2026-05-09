@@ -64,10 +64,13 @@ func DragosConfigPath() string {
 	return filepath.Join(homeDir, ".cloudcutter", "dragos.json")
 }
 
-// SaveDragosToken persists the JWT to ~/.cloudcutter/dragos.json,
-// preserving any other fields already in the file. The file is created with
-// 0600 permissions because the JWT is a credential.
-func SaveDragosToken(token string) error {
+// SaveDragosToken persists the JWT and the connection settings it was issued
+// against to ~/.cloudcutter/dragos.json. baseURL/providerID/indexPattern/
+// kbnVersion are stored alongside the token so a token issued against an
+// env-overridden baseURL doesn't get orphaned the next time the user starts
+// without that env var set. The file is created with 0600 permissions because
+// the JWT is a credential.
+func SaveDragosToken(token string, cfg DragosConfig) error {
 	path := DragosConfigPath()
 	if path == "" {
 		return fmt.Errorf("could not resolve home directory")
@@ -76,13 +79,26 @@ func SaveDragosToken(token string) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
-	cfg := DragosConfig{}
+	existing := DragosConfig{}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &cfg) // tolerate corruption — we're about to overwrite
+		_ = json.Unmarshal(data, &existing) // tolerate corruption — we're about to overwrite
 	}
-	cfg.AuthToken = strings.TrimSpace(token)
 
-	out, err := json.MarshalIndent(cfg, "", "  ")
+	existing.AuthToken = strings.TrimSpace(token)
+	if cfg.BaseURL != "" {
+		existing.BaseURL = cfg.BaseURL
+	}
+	if cfg.IndexPattern != "" {
+		existing.IndexPattern = cfg.IndexPattern
+	}
+	if cfg.KbnVersion != "" {
+		existing.KbnVersion = cfg.KbnVersion
+	}
+	if cfg.ProviderID != "" {
+		existing.ProviderID = cfg.ProviderID
+	}
+
+	out, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}

@@ -31,42 +31,24 @@ func (s *Services) InitializeDynamoDB(cfg aws.Config) error {
 	return nil
 }
 
+// InitializeElastic always (re)builds the Elastic service against the given
+// AWS config. Replacing unconditionally avoids leaving a Dragos-transport
+// service in place when the user switches from a Dragos profile to an AWS
+// profile without first visiting the elastic view.
 func (s *Services) InitializeElastic(cfg aws.Config) error {
-	if s.Elastic == nil {
-		elasticService, err := elastic.NewService(cfg)
-		if err != nil {
-			return fmt.Errorf("error creating Elasticsearch service: %v", err)
-		}
-		s.Elastic = elasticService
+	elasticService, err := elastic.NewService(cfg)
+	if err != nil {
+		return fmt.Errorf("error creating Elasticsearch service: %v", err)
 	}
+	s.Elastic = elasticService
 	return nil
 }
 
 func (s *Services) InitializeElasticDragos(d *auth.DragosSession) error {
-	if s.Elastic == nil {
-		svc, err := elastic.NewDragosService(d)
-		if err != nil {
-			return fmt.Errorf("error creating Dragos Elasticsearch service: %v", err)
-		}
-		s.Elastic = svc
+	svc, err := elastic.NewDragosService(d)
+	if err != nil {
+		return fmt.Errorf("error creating Dragos Elasticsearch service: %v", err)
 	}
+	s.Elastic = svc
 	return nil
-}
-
-func (s *Services) ReinitializeWithConfig(cfg aws.Config, viewName string) error {
-	s.Region = cfg.Region
-
-	switch viewName {
-	case "dynamodb":
-		s.DynamoDB = dynamodb.NewService(cfg)
-	case "elastic":
-		elasticService, err := elastic.NewService(cfg)
-		if err != nil {
-			return fmt.Errorf("error creating Elasticsearch service: %v", err)
-		}
-		s.Elastic = elasticService
-	}
-
-	return nil
-
 }

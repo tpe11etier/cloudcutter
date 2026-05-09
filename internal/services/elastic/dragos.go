@@ -31,10 +31,11 @@ import (
 // For GET requests the SDK sends with no body, we still POST to the proxy
 // with the original method tunneled via ?method=GET (proxy requires POST).
 //
-// On a 401 response, the transport tries to refresh the auth cookie (e.g. by
-// re-reading the user's browser cookie store) and retries the request once.
-// This is what lets the user just hit refresh in their Kibana browser tab to
-// renew the JWT without restarting cloudcutter.
+// On a 401 response, the transport re-reads dragos.json and retries the
+// request once. In practice the file only changes when the in-app login modal
+// writes a new token, so this retry is mostly defensive — a stale token will
+// surface as an auth error from probeDragosProxy or authenticateDragos before
+// search traffic ever runs.
 type dragosTransport struct {
 	client     *http.Client
 	baseURL    string
@@ -234,7 +235,10 @@ func (s *Service) ReinitializeDragos(d *auth.DragosSession) error {
 	if err != nil {
 		return fmt.Errorf("failed to create elasticsearch client: %w", err)
 	}
+	s.mu.Lock()
 	s.Client = client
+	s.cache = make(map[string]*IndexStats)
+	s.mu.Unlock()
 	return nil
 }
 
