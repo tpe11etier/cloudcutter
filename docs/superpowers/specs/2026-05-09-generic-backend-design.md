@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-09
 **Branch**: `dragos-platform`
-**Status**: Approved through brainstorming; awaiting implementation plan.
+**Status**: Phase 1 implemented (commit `phase-1-complete`). Phase 2 (auth refactor) plan to be drafted next.
 
 ## Problem
 
