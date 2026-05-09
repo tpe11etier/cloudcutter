@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/tpe11etier/cloudcutter/internal/auth"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/probe"
 )
 
 // dragosTransport rewrites every request the elasticsearch SDK makes so it
@@ -243,57 +244,23 @@ func (s *Service) ReinitializeDragos(d *auth.DragosSession) error {
 }
 
 // probeDragosProxy sends one POST to console/proxy?path=_cluster/health to
-// confirm we can reach Kibana with the given cookie. We can't trust the
-// status code alone — Dragos's edge gateway answers any unauthenticated or
-// unmatched route with the SPA login page (HTML, status 200) — so we also
-// check the response body's content type / shape and treat HTML as auth
-// failure.
+// confirm we can reach Kibana with the given cookie. Delegates to
+// internal/probe.Run for the response-validation logic, including the
+// HTML-on-401 detection that the Dragos edge gateway exhibits.
 func probeDragosProxy(ctx context.Context, t *dragosTransport, l *logger.Logger) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	probeURL := t.baseURL + "/kibana/api/console/proxy?path=_cluster/health&method=GET"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, probeURL, nil)
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, probeURL, nil)
 	if err != nil {
 		return fmt.Errorf("dragos probe: build request: %w", err)
 	}
 	t.applyHeaders(req)
 
-	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	req = req.WithContext(probeCtx)
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("dragos probe: request failed (check DRAGOS_BASE_URL and network): %w", err)
+	if err := probe.Run(probeCtx, t.client, req, true); err != nil {
+		return fmt.Errorf("dragos probe: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	ct := resp.Header.Get("Content-Type")
-
-	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("dragos probe: %d unauthorized — token is missing/expired/invalid", resp.StatusCode)
-	}
-
-	if isHTMLResponse(ct, body) {
-		return fmt.Errorf("dragos probe: got HTML (login page) from %s — token is stale or the gateway rejected it", probeURL)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("dragos probe: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	l.Debug("Dragos console/proxy probe ok", "content_type", ct)
+	l.Debug("Dragos console/proxy probe ok")
 	return nil
-}
-
-func isHTMLResponse(contentType string, body []byte) bool {
-	if strings.Contains(strings.ToLower(contentType), "text/html") {
-		return true
-	}
-	trimmed := strings.TrimSpace(string(body))
-	if len(trimmed) > 16 {
-		trimmed = trimmed[:16]
-	}
-	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
 }
