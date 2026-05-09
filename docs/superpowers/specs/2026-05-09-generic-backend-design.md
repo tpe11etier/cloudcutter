@@ -69,7 +69,7 @@ entry, not editing Go.
                ▼
 ┌──────────────────────────────────────┐
 │  environments pkg                    │  Resolve(name) → EnvironmentSpec
-│                                      │  Spec.Materialize(region) → Environment
+│                                      │  Materialize(spec, region) → Environment
 └──────────────┬───────────────────────┘
                │ Environment
                ▼
@@ -251,7 +251,7 @@ in-app. Resolution is two steps:
 
 1. `Resolver.Resolve(name) → EnvironmentSpec` — looks up by name, applies
    precedence rules. Region-agnostic.
-2. `EnvironmentSpec.Materialize(region) → Environment` — substitutes
+2. `Materialize(spec, region) → Environment` — free function that substitutes
    `{region}` and any `vars` keys, validates that all template references
    are resolvable for this profile-name + region pair.
 
@@ -276,7 +276,7 @@ type EnvironmentSpec struct {
     TimeFields   []TimeField           // promoted from elastic pkg
     Vars         map[string][]VarRule
 }
-type Environment struct {                // result of Spec.Materialize(region)
+type Environment struct {                // result of Materialize(spec, region)
     Name         string
     Region       string
     Auth         AuthSpec
