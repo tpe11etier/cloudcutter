@@ -12,6 +12,8 @@ type Config struct {
 
 // EnvironmentTemplate is applied to every auto-discovered ~/.aws profile
 // that doesn't have an explicit override under `environments`.
+// It is intentionally similar to EnvironmentSpec minus the Name field,
+// since AWS profiles supply the name.
 type EnvironmentTemplate struct {
 	Vars         map[string][]VarRule `yaml:"vars,omitempty"`
 	Auth         AuthSpec             `yaml:"auth"`
@@ -61,11 +63,16 @@ type LoginSpec struct {
 	TokenExtract TokenExtractSpec  `yaml:"token_extract"`
 }
 
+// FormField is one input on the in-app login form. Kind drives whether
+// the input is masked (password) or visible (text).
 type FormField struct {
 	Name string `yaml:"name"`
 	Kind string `yaml:"kind"` // "text" | "password"
 }
 
+// TokenExtractSpec describes how to pull the JWT out of the login response.
+// From=cookie reads a Set-Cookie by Name; from=header reads a response header by Name;
+// from=json_path is reserved (not yet implemented).
 type TokenExtractSpec struct {
 	From string `yaml:"from"` // "cookie" | "header" | "json_path"
 	Name string `yaml:"name"`
@@ -83,16 +90,26 @@ type TransportSpec struct {
 	Probe       *ProbeSpec        `yaml:"probe,omitempty"`
 }
 
+// TokenHeaderSpec describes how to attach the JWT on every outgoing request.
+// Name is the header to set (e.g. Cookie, Authorization).
+// Format is a template string containing the literal {token} placeholder,
+// e.g. "dragos-auth-token={token}" or "Bearer {token}".
 type TokenHeaderSpec struct {
 	Name   string `yaml:"name"`
 	Format string `yaml:"format"` // includes literal "{token}"
 }
 
+// ProbeSpec describes the connectivity check used to validate auth and transport.
+// Path is the ES URL path (e.g. _cluster/health).
+// RejectHTML rejects HTML responses as auth failure — used for gateways that
+// return their SPA login page on 401 with status 200.
 type ProbeSpec struct {
 	Path       string `yaml:"path"`
 	RejectHTML bool   `yaml:"reject_html,omitempty"`
 }
 
+// TimeField names one timestamp field on documents and how it's encoded.
+// Format must be one of: unix (seconds), unix_ms (milliseconds), or date (ISO 8601 strict_date_optional_time).
 type TimeField struct {
 	Name   string `yaml:"name"`
 	Format string `yaml:"format"` // "unix" | "unix_ms" | "date"
@@ -102,7 +119,7 @@ type TimeField struct {
 // AWS profile name being resolved) wins. Either Value or Env must be set;
 // Env names an environment variable to read.
 type VarRule struct {
-	Match string `yaml:"match"`
+	Match string `yaml:"match"` // regex against the AWS profile name; first matching rule wins
 	Value string `yaml:"value,omitempty"`
 	Env   string `yaml:"env,omitempty"`
 }
