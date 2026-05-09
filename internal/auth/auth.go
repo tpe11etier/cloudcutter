@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/probe"
 )
 
@@ -20,7 +21,15 @@ type Session struct {
 	Profile string
 	Region  string
 	// Dragos is populated only when Profile == DragosProfile.
+	// Phase 2: kept for backwards compatibility with view.go's
+	// session.Dragos != nil checks. Phase 4 deletes this field once
+	// callers consult Environment.Transport.Type instead.
 	Dragos *DragosSession
+	// Environment is the resolved description of the active backend.
+	// Populated alongside the legacy fields by SwitchEnvironment, which
+	// SwitchProfile now delegates to. Phase 2 readers may ignore this
+	// field; phase 4 makes it the source of truth.
+	Environment environments.Environment
 }
 
 // DragosSession carries the state needed to talk to the Dragos Kibana endpoint.
