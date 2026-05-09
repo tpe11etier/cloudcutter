@@ -95,70 +95,26 @@ func (a *Authenticator) sendStatus(status string) {
 	}
 }
 
+// SwitchProfile is the legacy entry point: callers pass a profile name and
+// region, and SwitchProfile builds the corresponding Environment from
+// legacy config sources (~/.cloudcutter/dragos.json, the opal profile map,
+// env vars) and delegates to SwitchEnvironment.
+//
+// Phase 4 deletes this method when callers switch to SwitchEnvironment
+// directly.
 func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region string) (*Session, error) {
-	a.mu.Lock()
-	if a.isAuthenticating {
-		a.mu.Unlock()
-		return nil, fmt.Errorf("authentication already in progress")
-	}
-	a.isAuthenticating = true
-	a.mu.Unlock()
-
-	defer func() {
-		a.mu.Lock()
-		a.isAuthenticating = false
-		a.mu.Unlock()
-	}()
-
-	if a.currentSession != nil &&
-		a.currentSession.Profile == profile &&
-		a.currentSession.Region == region {
-		return a.currentSession, nil
+	a.mu.RLock()
+	cached := a.currentSession
+	a.mu.RUnlock()
+	if cached != nil && cached.Profile == profile && cached.Region == region {
+		return cached, nil
 	}
 
-	a.sendStatus(fmt.Sprintf("Switching to profile %s in %s", profile, region))
-
-	session := &Session{
-		Profile: profile,
-		Region:  region,
+	env, err := a.legacyToEnvironment(profile, region)
+	if err != nil {
+		return nil, err
 	}
-
-	switch {
-	case profile == DragosProfile:
-		cfg, dragos, err := a.authenticateDragos(ctx, region)
-		if err != nil {
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-		session.Config = cfg
-		session.Dragos = dragos
-
-	case a.opalProfiles[profile] != "":
-		cfg, err := a.authenticateOpal(ctx, profile, region, a.opalProfiles[profile])
-		if err != nil {
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-		session.Config = cfg
-
-	case profile == "local":
-		cfg, err := a.authenticateLocal(ctx, region)
-		if err != nil {
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-		session.Config = cfg
-
-	default:
-		cfg, err := a.authenticateStandard(ctx, profile, region)
-		if err != nil {
-			return nil, fmt.Errorf("authentication failed: %w", err)
-		}
-		session.Config = cfg
-	}
-
-	a.mu.Lock()
-	a.currentSession = session
-	a.mu.Unlock()
-
-	return session, nil
+	return a.SwitchEnvironment(ctx, env)
 }
 
 func (a *Authenticator) authenticateStandard(ctx context.Context, profile, region string) (aws.Config, error) {
@@ -170,77 +126,6 @@ func (a *Authenticator) authenticateStandard(ctx context.Context, profile, regio
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
 
-	return config.LoadDefaultConfig(ctx, opts...)
-}
-
-func (a *Authenticator) authenticateOpal(ctx context.Context, profile, region, roleID string) (aws.Config, error) {
-	if err := a.runOpalCommand(ctx, roleID, profile); err != nil {
-		return aws.Config{}, err
-	}
-
-	return a.authenticateStandard(ctx, profile, region)
-}
-
-func (a *Authenticator) runOpalCommand(ctx context.Context, roleID, profileName string) error {
-	cmd := exec.Command("opal", "iam-roles:start", "--id", roleID, "--profileName", profileName)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	a.sendStatus("Starting Opal authentication...")
-	if err := cmd.Run(); err != nil {
-		output := stdout.String() + stderr.String()
-
-		if strings.Contains(output, "Enter your email") ||
-			strings.Contains(output, "session is invalid or expired") {
-			return fmt.Errorf("opal session expired. Please run '%s' in terminal first", profileName)
-		}
-
-		return fmt.Errorf("Opal command failed: %v\nOutput: %s", err, output)
-	}
-
-	a.sendStatus("Opal authentication completed successfully")
-	return nil
-}
-
-func (a *Authenticator) authenticateDragos(ctx context.Context, region string) (aws.Config, *DragosSession, error) {
-	cfg, err := LoadDragosConfig()
-	if err != nil {
-		return aws.Config{}, nil, err
-	}
-	a.sendStatus(fmt.Sprintf("Verifying Dragos token at %s", cfg.BaseURL))
-
-	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	probeURL := strings.TrimRight(cfg.BaseURL, "/") + "/kibana/api/console/proxy?path=_cluster/health&method=GET"
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, probeURL, nil)
-	if err != nil {
-		return aws.Config{}, nil, fmt.Errorf("dragos probe: build request: %w", err)
-	}
-	req.Header.Set("Cookie", "dragos-auth-token="+cfg.AuthToken)
-	req.Header.Set("kbn-xsrf", "cloudcutter")
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.KbnVersion != "" {
-		req.Header.Set("kbn-version", cfg.KbnVersion)
-	}
-
-	if err := probe.Run(probeCtx, &http.Client{Timeout: 15 * time.Second}, req, true); err != nil {
-		return aws.Config{}, nil, err
-	}
-
-	return aws.Config{Region: region}, &DragosSession{
-		BaseURL:      cfg.BaseURL,
-		AuthToken:    cfg.AuthToken,
-		IndexPattern: cfg.IndexPattern,
-		KbnVersion:   cfg.KbnVersion,
-	}, nil
-}
-
-func (a *Authenticator) authenticateLocal(ctx context.Context, region string) (aws.Config, error) {
-	opts := []func(*config.LoadOptions) error{
-		config.WithRegion("local"),
-	}
 	return config.LoadDefaultConfig(ctx, opts...)
 }
 
@@ -275,7 +160,10 @@ func (a *Authenticator) SwitchEnvironment(ctx context.Context, env environments.
 
 	switch env.Auth.Type {
 	case "none":
-		// No-op. Session.Config stays zero-value.
+		// No AWS credentials needed; still propagate the region so callers
+		// that inspect session.Config.Region (e.g. the local profile) see a
+		// consistent value.
+		session.Config = aws.Config{Region: env.Region}
 
 	case "aws_sdk":
 		if env.Auth.PreAuth != nil {
