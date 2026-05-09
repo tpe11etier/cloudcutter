@@ -1,0 +1,4 @@
+environments:
+  - name: x
+    auth: { type: oauth }
+    transport: { type: plain, base_url: http://localhost:9200 }

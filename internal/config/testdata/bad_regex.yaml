@@ -1,0 +1,9 @@
+default_aws_backend:
+  vars:
+    prefix:
+      - { match: "[unclosed", value: dev }
+  auth: { type: aws_sdk }
+  transport:
+    type: sigv4
+    service: es
+    url_template: "https://{prefix}-{region}-x.example.com"

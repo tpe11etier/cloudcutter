@@ -1,0 +1,3 @@
+environments:
+  - name: dragos
+    transport: { type: plain, base_url: http://localhost:9200 }
