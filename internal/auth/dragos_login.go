@@ -12,68 +12,6 @@ import (
 	"time"
 )
 
-// ProbeDragos verifies a token+baseURL combination by hitting the Kibana
-// console proxy with `_cluster/health`. The Dragos edge gateway answers
-// unauthenticated requests with HTTP 200 + the SPA login HTML, so the probe
-// also rejects HTML responses regardless of status code.
-//
-// Called from authenticateDragos so a stale token surfaces as an error during
-// the synchronous SwitchProfile path — otherwise the failure happens deep
-// inside the lazy view constructor where errors are swallowed.
-func ProbeDragos(ctx context.Context, baseURL, token, kbnVersion string) error {
-	if baseURL == "" {
-		return fmt.Errorf("dragos baseURL is empty")
-	}
-	if token == "" {
-		return fmt.Errorf("dragos auth token is empty")
-	}
-
-	probeURL := strings.TrimRight(baseURL, "/") + "/kibana/api/console/proxy?path=_cluster/health&method=GET"
-
-	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, probeURL, nil)
-	if err != nil {
-		return fmt.Errorf("dragos probe: build request: %w", err)
-	}
-	req.Header.Set("Cookie", "dragos-auth-token="+token)
-	req.Header.Set("kbn-xsrf", "cloudcutter")
-	req.Header.Set("Content-Type", "application/json")
-	if kbnVersion != "" {
-		req.Header.Set("kbn-version", kbnVersion)
-	}
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("dragos probe: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	ct := resp.Header.Get("Content-Type")
-
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("dragos probe: %d unauthorized — token is missing/expired/invalid", resp.StatusCode)
-	}
-	if strings.Contains(strings.ToLower(ct), "text/html") {
-		return fmt.Errorf("dragos probe: gateway returned HTML — token rejected or stale")
-	}
-	trimmed := strings.TrimSpace(string(body))
-	if len(trimmed) > 16 {
-		trimmed = trimmed[:16]
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
-		return fmt.Errorf("dragos probe: gateway returned HTML — token rejected or stale")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("dragos probe: status %d", resp.StatusCode)
-	}
-	return nil
-}
-
 // LoginWithPassword exchanges a username/password for a Dragos session JWT by
 // POSTing to /auth/api/v1/login/password?providerId=<providerID>. The JWT is
 // returned by the server as a Set-Cookie header (`dragos-auth-token=...`); we

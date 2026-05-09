@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/tpe11etier/cloudcutter/internal/probe"
 )
 
 type Session struct {
@@ -191,9 +194,26 @@ func (a *Authenticator) authenticateDragos(ctx context.Context, region string) (
 		return aws.Config{}, nil, err
 	}
 	a.sendStatus(fmt.Sprintf("Verifying Dragos token at %s", cfg.BaseURL))
-	if err := ProbeDragos(ctx, cfg.BaseURL, cfg.AuthToken, cfg.KbnVersion); err != nil {
+
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	probeURL := strings.TrimRight(cfg.BaseURL, "/") + "/kibana/api/console/proxy?path=_cluster/health&method=GET"
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, probeURL, nil)
+	if err != nil {
+		return aws.Config{}, nil, fmt.Errorf("dragos probe: build request: %w", err)
+	}
+	req.Header.Set("Cookie", "dragos-auth-token="+cfg.AuthToken)
+	req.Header.Set("kbn-xsrf", "cloudcutter")
+	req.Header.Set("Content-Type", "application/json")
+	if cfg.KbnVersion != "" {
+		req.Header.Set("kbn-version", cfg.KbnVersion)
+	}
+
+	if err := probe.Run(probeCtx, &http.Client{Timeout: 15 * time.Second}, req, true); err != nil {
 		return aws.Config{}, nil, err
 	}
+
 	return aws.Config{Region: region}, &DragosSession{
 		BaseURL:      cfg.BaseURL,
 		AuthToken:    cfg.AuthToken,
