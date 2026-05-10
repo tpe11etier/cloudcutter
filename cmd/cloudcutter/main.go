@@ -17,6 +17,7 @@ import (
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpe11etier/cloudcutter/internal/services"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
 	"github.com/tpe11etier/cloudcutter/internal/ui"
 	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 	ddbv "github.com/tpe11etier/cloudcutter/internal/ui/views/dynamodb"
@@ -110,20 +111,20 @@ func runApplication() {
 		return ddbv.NewView(viewManager, services.DynamoDB), nil
 	})
 	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
-		defaultIndex := "main-summary-*"
+		session := viewManager.CurrentSession()
+		if session == nil {
+			return nil, fmt.Errorf("no active session for elastic view")
+		}
 
-		if session := viewManager.CurrentSession(); session != nil && session.Dragos != nil {
-			if err := services.InitializeElasticDragos(session.Dragos); err != nil {
-				return nil, err
-			}
-			if session.Dragos.IndexPattern != "" {
-				defaultIndex = session.Dragos.IndexPattern
-			}
-		} else {
-			currentConfig := viewManager.GetCurrentConfig()
-			if err := services.InitializeElastic(currentConfig); err != nil {
-				return nil, err
-			}
+		svc, err := elastic.NewServiceFromEnv(session.Environment, session.Config, session.Token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create elastic service: %w", err)
+		}
+		services.Elastic = svc
+
+		defaultIndex := session.Environment.IndexPattern
+		if defaultIndex == "" {
+			defaultIndex = "main-summary-*"
 		}
 
 		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, defaultIndex)
