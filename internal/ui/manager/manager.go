@@ -885,7 +885,7 @@ func (vm *Manager) switchToEnvironment(name string) {
 			vm.app.QueueUpdateDraw(func() {
 				vm.statusBar.SetText(fmt.Sprintf("Auth failed: %v", err))
 				if needsLoginModal {
-					vm.ShowDragosLoginModal(
+					vm.ShowJWTLoginModal(env,
 						func() { vm.switchToEnvironment(name) },
 						func() { vm.StatusChan <- "Auth canceled" },
 					)
@@ -908,7 +908,7 @@ func (vm *Manager) switchToEnvironment(name string) {
 			vm.app.QueueUpdateDraw(func() {
 				vm.statusBar.SetText(fmt.Sprintf("Reinit failed: %v", err))
 				if needsLoginModal {
-					vm.ShowDragosLoginModal(
+					vm.ShowJWTLoginModal(env,
 						func() { vm.switchToEnvironment(name) },
 						func() { vm.StatusChan <- "Auth canceled" },
 					)
@@ -925,25 +925,29 @@ func (vm *Manager) switchToEnvironment(name string) {
 	})
 }
 
-// ShowDragosLoginModal opens a username/password form. On submit, it POSTs to
-// /auth/api/v1/login/password, persists the resulting JWT to dragos.json, and
-// calls onSuccess. Esc calls onCancel.
-func (vm *Manager) ShowDragosLoginModal(onSuccess func(), onCancel func()) {
-	const pageName = "dragosLogin"
+// ShowJWTLoginModal opens a form derived from env.Auth.Login.BodyFields,
+// POSTs the submitted values via auth.LoginJWT, persists the resulting
+// token to env.Auth.Path, and calls onSuccess. Esc / Cancel calls
+// onCancel.
+//
+// Replaces the dragos-named ShowDragosLoginModal. All vendor-specific
+// knobs (URL, providerId, body fields, token extraction) come from
+// env.Auth.Login.
+func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess func(), onCancel func()) {
+	const pageName = "jwtLogin"
 
-	// Pull current base/provider from config so a future user with a custom
-	// dragos.json (different host or IDP) doesn't get a hardcoded value.
-	cfg, _ := auth.LoadDragosConfig()
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = auth.DefaultDragosBaseURL
+	if env.Auth.Login == nil {
+		vm.statusBar.SetText(fmt.Sprintf("Environment %q has no login spec", env.Name))
+		if onCancel != nil {
+			onCancel()
+		}
+		return
 	}
-	if cfg.ProviderID == "" {
-		cfg.ProviderID = auth.DefaultDragosProviderID
-	}
+	loginSpec := *env.Auth.Login
 
 	form := tview.NewForm()
 	form.SetBorder(true)
-	form.SetTitle(fmt.Sprintf(" Dragos Login — %s (Tab to move, Enter to submit, Esc to cancel) ", cfg.BaseURL))
+	form.SetTitle(fmt.Sprintf(" %s Login — %s (Tab to move, Enter to submit, Esc to cancel) ", env.Name, loginSpec.URL))
 	form.SetTitleAlign(tview.AlignLeft)
 	form.SetTitleColor(style.GruvboxMaterial.Yellow)
 	form.SetBorderColor(tcell.ColorMediumTurquoise)
@@ -952,34 +956,54 @@ func (vm *Manager) ShowDragosLoginModal(onSuccess func(), onCancel func()) {
 	form.SetButtonBackgroundColor(tcell.ColorDarkCyan)
 	form.SetButtonTextColor(tcell.ColorBeige)
 
-	form.AddInputField("Username", "", 40, nil, nil)
-	form.AddPasswordField("Password", "", 40, '*', nil)
+	for _, f := range loginSpec.BodyFields {
+		label := titleCase(f.Name)
+		if f.Kind == "password" {
+			form.AddPasswordField(label, "", 40, '*', nil)
+		} else {
+			form.AddInputField(label, "", 40, nil, nil)
+		}
+	}
 
 	closeModal := func() { vm.pages.RemovePage(pageName) }
 
 	submit := func() {
-		username := strings.TrimSpace(form.GetFormItemByLabel("Username").(*tview.InputField).GetText())
-		password := form.GetFormItemByLabel("Password").(*tview.InputField).GetText()
-		if username == "" || password == "" {
-			vm.statusBar.SetText("Username and password are required")
+		values := make(map[string]string, len(loginSpec.BodyFields))
+		missing := []string{}
+		for _, f := range loginSpec.BodyFields {
+			label := titleCase(f.Name)
+			input, ok := form.GetFormItemByLabel(label).(*tview.InputField)
+			if !ok {
+				continue
+			}
+			val := input.GetText()
+			if f.Kind != "password" {
+				val = strings.TrimSpace(val)
+			}
+			if val == "" {
+				missing = append(missing, label)
+			}
+			values[f.Name] = val
+		}
+		if len(missing) > 0 {
+			vm.statusBar.SetText(fmt.Sprintf("Required: %s", strings.Join(missing, ", ")))
 			return
 		}
 
-		vm.statusBar.SetText("Authenticating with Dragos...")
-
+		vm.statusBar.SetText(fmt.Sprintf("Authenticating with %s...", env.Name))
 		go func() {
-			token, err := auth.LoginWithPassword(vm.ctx, cfg.BaseURL, cfg.ProviderID, username, password)
+			token, err := auth.LoginJWT(vm.ctx, loginSpec, values)
 			vm.app.QueueUpdateDraw(func() {
 				if err != nil {
 					vm.statusBar.SetText(fmt.Sprintf("Login failed: %v", err))
 					return
 				}
-				if err := auth.SaveDragosToken(token, cfg); err != nil {
+				if err := auth.WriteTokenFile(env.Auth.Path, token); err != nil {
 					vm.statusBar.SetText(fmt.Sprintf("Login OK but couldn't save token: %v", err))
 					return
 				}
 				closeModal()
-				vm.statusBar.SetText("Dragos login successful")
+				vm.statusBar.SetText(fmt.Sprintf("%s login successful", env.Name))
 				if onSuccess != nil {
 					onSuccess()
 				}
@@ -1001,25 +1025,20 @@ func (vm *Manager) ShowDragosLoginModal(onSuccess func(), onCancel func()) {
 		}
 	})
 
-	// Submit when Enter is pressed while focus is on either text field —
-	// tview's default is "move to next field," but for a 2-field login form
-	// it's nicer to just submit on Enter from the password field.
 	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() != tcell.KeyEnter {
 			return event
 		}
-		// If the focus is on a button, let the form handle Enter normally
-		// (the button's selected handler runs).
 		_, btnIdx := form.GetFocusedItemIndex()
 		if btnIdx >= 0 {
 			return event
 		}
-		// Focus is on Username or Password — submit directly.
 		submit()
 		return nil
 	})
 
-	width, height := 60, 9
+	height := 5 + 2*len(loginSpec.BodyFields)
+	width := 60
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(nil, 0, 1, false).
 		AddItem(tview.NewFlex().
@@ -1031,6 +1050,15 @@ func (vm *Manager) ShowDragosLoginModal(onSuccess func(), onCancel func()) {
 
 	vm.pages.AddPage(pageName, layout, true, true)
 	vm.app.SetFocus(form)
+}
+
+// titleCase capitalizes the first letter of s. Used to render lowercase
+// body_fields names ("username") as proper form labels ("Username").
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func (vm *Manager) reinitializeActiveView() error {

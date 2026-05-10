@@ -253,7 +253,7 @@ func loadJWT(spec internalconfig.AuthSpec) (string, error) {
 		}
 	}
 	if spec.Path != "" {
-		path, err := expandHome(spec.Path)
+		path, err := ExpandHome(spec.Path)
 		if err != nil {
 			return "", err
 		}
@@ -271,22 +271,6 @@ func loadJWT(spec internalconfig.AuthSpec) (string, error) {
 		return t, nil
 	}
 	return "", fmt.Errorf("jwt token unavailable: no env or path configured")
-}
-
-// expandHome resolves a leading "~" to the user's home directory.
-// Anything else passes through unchanged.
-func expandHome(path string) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("expand %q: %w", path, err)
-		}
-		if path == "~" {
-			return home, nil
-		}
-		return home + path[1:], nil
-	}
-	return path, nil
 }
 
 // runJWTProbe builds a probe request from the Environment and runs it.
