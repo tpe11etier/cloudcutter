@@ -23,33 +23,12 @@ type Session struct {
 	Config  aws.Config
 	Profile string
 	Region  string
-	// Dragos is populated only when Profile == DragosProfile.
-	// Phase 2: kept for backwards compatibility with view.go's
-	// session.Dragos != nil checks. Phase 4 deletes this field once
-	// callers consult Environment.Transport.Type instead.
-	Dragos *DragosSession
-	// Environment is the resolved description of the active backend.
-	// Populated alongside the legacy fields by SwitchEnvironment, which
-	// SwitchProfile now delegates to. Phase 2 readers may ignore this
-	// field; phase 4 makes it the source of truth.
+	// Environment is the resolved description of the active backend, populated by SwitchEnvironment.
 	Environment environments.Environment
 	// Token is the JWT for jwt-typed environments. Empty for aws_sdk and
 	// none. Populated by SwitchEnvironment from Auth.Env or Auth.Path.
 	Token string
 }
-
-// DragosSession carries the state needed to talk to the Dragos Kibana endpoint.
-// It is intentionally separate from aws.Config because the auth model has
-// nothing in common with AWS SigV4.
-type DragosSession struct {
-	BaseURL      string
-	AuthToken    string
-	IndexPattern string
-	KbnVersion   string
-}
-
-// DragosProfile is the profile name selected from the picker to use Dragos.
-const DragosProfile = "dragos"
 
 type Authenticator struct {
 	mu               sync.RWMutex
@@ -161,18 +140,6 @@ func (a *Authenticator) SwitchEnvironment(ctx context.Context, env environments.
 			if err := runJWTProbe(ctx, env, token); err != nil {
 				return nil, err
 			}
-		}
-		// Phase 2 backwards-compat: still populate the legacy DragosSession
-		// so view.go's session.Dragos != nil checks work. Phase 4 deletes
-		// this branch.
-		if env.Name == DragosProfile {
-			session.Dragos = &DragosSession{
-				BaseURL:      env.Transport.BaseURL,
-				AuthToken:    token,
-				IndexPattern: env.IndexPattern,
-				KbnVersion:   env.Transport.Headers["kbn-version"],
-			}
-			session.Config = aws.Config{Region: env.Region}
 		}
 
 	default:
