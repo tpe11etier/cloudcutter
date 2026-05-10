@@ -7,18 +7,20 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpe11etier/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
 	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 	"gopkg.in/ini.v1"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 type Manager interface {
 	Pages() *tview.Pages
+	Resolver() *environments.Resolver
 }
 
 type Selector struct {
@@ -52,17 +54,19 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 		SetTitleColor(style.GruvboxMaterial.Foreground).
 		SetBorderColor(tcell.ColorMediumTurquoise)
 
-	// Discover available profiles
-	selector.profiles = selector.discoverProfiles()
+	if r := manager.Resolver(); r != nil {
+		selector.profiles = r.List()
+		sort.Strings(selector.profiles)
+	}
 
-	// Add all discovered profiles
 	for _, profile := range selector.profiles {
 		selector.AddItem(profile, "", 0, nil)
 	}
 
-	// Set selection handler to use profile name directly
 	selector.SetSelectedFunc(func(index int, name string, secondName string, shortcut rune) {
-		selector.switchProfile(name)
+		// All dispatch goes through the manager's onSelect callback.
+		// Special-casing per profile name is gone in phase 4.
+		selector.onSelect(name)
 	})
 
 	selector.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {

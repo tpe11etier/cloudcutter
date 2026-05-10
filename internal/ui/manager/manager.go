@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -604,73 +603,6 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	return event
 }
 
-func (vm *Manager) switchToDevProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return errors.New(status)
-	}
-
-	vm.profileHandler.SwitchProfile(vm.ctx, "opal_dev", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to dev profile: %v", err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "opal_dev")
-		vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
-
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic after dev profile", "error", err)
-		}
-
-		vm.StatusChan <- "Successfully switched to dev profile"
-	})
-
-	return nil
-}
-
-func (vm *Manager) switchToLocalProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return errors.New(status)
-	}
-
-	vm.logger.Info("Starting local profile switch")
-	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.logger.Error("Failed to switch to local profile", "error", err)
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "local")
-		vm.header.UpdateEnvVar("Region", "local")
-
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.logger.Error("Error reinitializing active view", "error", err)
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing active view: %v", err)
-			return
-		}
-
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.logger.Error("Failed to switch to Elastic after local profile", "error", err)
-		}
-
-		vm.StatusChan <- "Successfully switched to local profile"
-	})
-
-	return nil
-}
-
 func (vm *Manager) reinitializeViews() error {
 	if vm.activeView != nil {
 		activeName := vm.activeView.Name()
@@ -686,24 +618,12 @@ func (vm *Manager) reinitializeViews() error {
 func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
-		func(profile string) {
+		func(name string) {
 			if vm.activeView != nil {
 				vm.focusActiveView()
 			}
-
-			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
-			switch profile {
-			case "opal_dev":
-				vm.switchToDevProfile()
-			case "opal_prod":
-				vm.switchToProdProfile()
-			case "local":
-				vm.switchToLocalProfile()
-			case auth.DragosProfile:
-				vm.switchToDragosProfile()
-			default:
-				vm.switchToStandardProfile(profile)
-			}
+			vm.statusBar.SetText(fmt.Sprintf("Switching to %s...", name))
+			vm.switchToEnvironment(name)
 		},
 		func() {
 			vm.pages.RemovePage("profileSelector")
@@ -917,75 +837,12 @@ func (vm *Manager) hideLoading() {
 	}
 }
 
-func (vm *Manager) switchToProdProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return errors.New(status)
-	}
-
-	vm.hideProfileSelector()
-
-	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to prod profile: %v", err)
-			return
-		}
-
-		vm.app.QueueUpdateDraw(func() {
-			vm.awsConfig = cfg
-			vm.header.UpdateEnvVar("Profile", "opal_prod")
-			vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
-			vm.showLoading("Loading Available Fields...")
-		})
-
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		vm.StatusChan <- "Successfully switched to prod profile"
-	})
-
-	return nil
-}
-
 func (vm *Manager) UpdateViewCommands(commands []header.ViewCommands) {
 	vm.header.SetViewCommands(commands)
 }
 
 func (vm *Manager) GetStatusBar() *statusbar.StatusBar {
 	return vm.statusBar
-}
-
-func (vm *Manager) switchToStandardProfile(profile string) {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return
-	}
-
-	vm.profileHandler.SwitchProfile(vm.ctx, profile, func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to profile %s: %v", profile, err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", profile)
-		vm.header.UpdateEnvVar("Region", vm.profileHandler.GetRegion())
-
-		if err := vm.reinitializeViews(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic after standard profile", "error", err)
-		}
-
-		vm.StatusChan <- fmt.Sprintf("Successfully switched to profile %s", profile)
-	})
 }
 
 // switchToEnvironment is the unified profile-switch entry point introduced
@@ -1065,70 +922,6 @@ func (vm *Manager) switchToEnvironment(name string) {
 		}
 
 		vm.StatusChan <- fmt.Sprintf("Switched to %s", sess.Environment.Name)
-	})
-}
-
-// switchToDragosProfile authenticates the dragos profile. If no token is
-// resolvable (or the existing one fails the probe), pops the login modal so
-// the user can sign in with username + password.
-func (vm *Manager) switchToDragosProfile() {
-	if vm.profileHandler.IsAuthenticating() {
-		vm.StatusChan <- "Authentication already in progress"
-		return
-	}
-
-	// If we don't have any token at all, prompt before even attempting auth.
-	// Standard profiles get the picker removed by profileHandler.SwitchProfile's
-	// onLoadStart callback; we don't go through that path when prompting, so
-	// remove it explicitly here or the selector hides our modal.
-	if _, err := auth.LoadDragosConfig(); err != nil {
-		vm.pages.RemovePage("profileSelector")
-		vm.statusBar.SetText("Dragos: please log in")
-		vm.ShowDragosLoginModal(
-			func() { vm.switchToDragosProfile() },
-			func() { vm.StatusChan <- "Dragos auth canceled" },
-		)
-		return
-	}
-
-	vm.profileHandler.SwitchProfile(vm.ctx, auth.DragosProfile, func(cfg aws.Config, err error) {
-		if err != nil {
-			// Most likely cause: token expired or rejected by the gateway.
-			// Pop the login modal so the user can sign in again without
-			// re-navigating through the profile picker.
-			vm.app.QueueUpdateDraw(func() {
-				vm.statusBar.SetText(fmt.Sprintf("Dragos auth failed: %v", err))
-				vm.ShowDragosLoginModal(
-					func() { vm.switchToDragosProfile() },
-					func() { vm.StatusChan <- "Dragos auth canceled" },
-				)
-			})
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", auth.DragosProfile)
-		vm.header.UpdateEnvVar("Region", "—")
-
-		if err := vm.reinitializeViews(); err != nil {
-			// Reinit error on dragos almost always means the saved token is
-			// stale — the gateway accepts our cookie at login but rejects it
-			// later, or the proxy returns SPA-fallback HTML. Pop the login
-			// modal so the user can sign in fresh instead of just seeing an
-			// opaque status-bar error.
-			vm.app.QueueUpdateDraw(func() {
-				vm.statusBar.SetText(fmt.Sprintf("Dragos session expired: %v", err))
-				vm.ShowDragosLoginModal(
-					func() { vm.switchToDragosProfile() },
-					func() { vm.StatusChan <- "Dragos auth canceled" },
-				)
-			})
-			return
-		}
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic after dragos profile", "error", err)
-		}
-		vm.StatusChan <- "Successfully switched to dragos profile"
 	})
 }
 
