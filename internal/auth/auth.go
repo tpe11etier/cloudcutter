@@ -35,24 +35,11 @@ type Authenticator struct {
 	currentSession   *Session
 	isAuthenticating bool
 	onStatus         func(string)
-	opalConfig       OpalConfig
-	opalProfiles     map[string]string // maps profile names to role IDs
 }
 
 func New(statusFn func(string)) (*Authenticator, error) {
-	opalConfig := LoadOpalConfig()
-
-	opalProfiles := make(map[string]string)
-	for _, env := range opalConfig.Environments {
-		for _, profileTag := range env.ProfileTags {
-			opalProfiles[profileTag] = env.RoleID
-		}
-	}
-
 	return &Authenticator{
-		onStatus:     statusFn,
-		opalConfig:   opalConfig,
-		opalProfiles: opalProfiles,
+		onStatus: statusFn,
 	}, nil
 }
 
