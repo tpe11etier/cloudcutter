@@ -242,6 +242,10 @@ func (a *Authenticator) runPreAuthCommand(ctx context.Context, spec *internalcon
 // loadJWT resolves the token from env > path. Returns an error when none
 // is available; callers may then trigger a login modal flow (the manager
 // is responsible for that — auth itself doesn't pop UIs).
+//
+// `~/...` paths are expanded against the user's home directory because
+// the YAML schema documents tilde-paths and users naturally write them.
+// os.ReadFile does no shell-style expansion on its own.
 func loadJWT(spec internalconfig.AuthSpec) (string, error) {
 	if spec.Env != "" {
 		if v := strings.TrimSpace(os.Getenv(spec.Env)); v != "" {
@@ -249,20 +253,40 @@ func loadJWT(spec internalconfig.AuthSpec) (string, error) {
 		}
 	}
 	if spec.Path != "" {
-		raw, err := os.ReadFile(spec.Path)
+		path, err := expandHome(spec.Path)
+		if err != nil {
+			return "", err
+		}
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return "", fmt.Errorf("jwt token not available: file %s does not exist (set $%s or run the login flow)", spec.Path, spec.Env)
+				return "", fmt.Errorf("jwt token not available: file %s does not exist (set $%s or run the login flow)", path, spec.Env)
 			}
-			return "", fmt.Errorf("read jwt %s: %w", spec.Path, err)
+			return "", fmt.Errorf("read jwt %s: %w", path, err)
 		}
 		t := strings.TrimSpace(string(raw))
 		if t == "" {
-			return "", fmt.Errorf("jwt token at %s is empty", spec.Path)
+			return "", fmt.Errorf("jwt token at %s is empty", path)
 		}
 		return t, nil
 	}
 	return "", fmt.Errorf("jwt token unavailable: no env or path configured")
+}
+
+// expandHome resolves a leading "~" to the user's home directory.
+// Anything else passes through unchanged.
+func expandHome(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand %q: %w", path, err)
+		}
+		if path == "~" {
+			return home, nil
+		}
+		return home + path[1:], nil
+	}
+	return path, nil
 }
 
 // runJWTProbe builds a probe request from the Environment and runs it.
