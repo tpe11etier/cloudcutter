@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-09
 **Branch**: `dragos-platform`
-**Status**: Phase 2 implemented (tag `phase-2-complete`). Phase 3 (transport refactor) plan to be drafted next.
+**Status**: Phase 3 implemented (tag `phase-3-complete`). Phase 4 (manager + view cleanup) plan to be drafted next.
 
 ## Problem
 
