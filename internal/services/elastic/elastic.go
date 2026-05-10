@@ -9,11 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tpe11etier/cloudcutter/internal/config"
-	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/elastic/go-elasticsearch/v6"
 )
 
@@ -22,58 +19,6 @@ type Service struct {
 	log    *logger.Logger
 	cache  map[string]*IndexStats
 	mu     sync.RWMutex
-}
-
-// NewService is the legacy entry point: callers pass an aws.Config
-// (region pulled from there) and the Service is built against the Sophos
-// darkbytes URL template. Phase 3 keeps this working by translating the
-// AWS config into an Environment internally and delegating to
-// NewServiceFromEnv. Phase 4 deletes this once the manager constructs
-// Environment values from the Resolver and calls NewServiceFromEnv
-// directly.
-func NewService(cfg aws.Config) (*Service, error) {
-	return NewServiceFromEnv(legacySophosEnvFromAWSConfig(cfg, "default"), cfg, "")
-}
-
-// Reinitialize is the legacy reinit entry point. profile is used only to
-// pick the URL prefix ("dev" vs "prod") in the legacy darkbytes template.
-func (s *Service) Reinitialize(cfg aws.Config, profile string) error {
-	return s.ReinitializeFromEnv(legacySophosEnvFromAWSConfig(cfg, profile), cfg, "")
-}
-
-// legacySophosEnvFromAWSConfig builds a phase-3 bridge Environment that
-// reproduces the URL the legacy awsTransport hit: localhost:9200 for
-// region=local, otherwise https://{prefix}-{region}-primary-es.darkbytes.io
-// where prefix is "prod" for opal_prod and "dev" otherwise.
-//
-// The vendor-named darkbytes URL is the only company-specific knob still
-// present in the running code path after phase 3; phase 4 removes it
-// when the manager supplies Environment values from the YAML resolver.
-func legacySophosEnvFromAWSConfig(cfg aws.Config, profile string) environments.Environment {
-	if cfg.Region == "local" {
-		return environments.Environment{
-			Name: "local",
-			Auth: config.AuthSpec{Type: "none"},
-			Transport: config.TransportSpec{
-				Type:    "plain",
-				BaseURL: "http://localhost:9200",
-			},
-		}
-	}
-	prefix := "dev"
-	if profile == "opal_prod" {
-		prefix = "prod"
-	}
-	return environments.Environment{
-		Name:   profile,
-		Region: cfg.Region,
-		Auth:   config.AuthSpec{Type: "aws_sdk"},
-		Transport: config.TransportSpec{
-			Type:        "sigv4",
-			Service:     "es",
-			URLTemplate: fmt.Sprintf("https://%s-%s-primary-es.darkbytes.io", prefix, cfg.Region),
-		},
-	}
 }
 
 func (s *Service) ListIndices(ctx context.Context, pattern string) ([]string, error) {
