@@ -578,8 +578,12 @@ func (v *View) showTableItems(tableName string) {
 		})
 	}()
 }
-func (v *View) Reinitialize(cfg aws.Config) error {
-	v.service = dynamodb.NewService(cfg)
+func (v *View) Reinitialize() error {
+	session := v.manager.CurrentSession()
+	if session == nil {
+		return fmt.Errorf("no active session")
+	}
+	v.service = dynamodb.NewService(session.Config)
 
 	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.state.originalItems = nil

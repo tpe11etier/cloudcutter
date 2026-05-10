@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
@@ -19,7 +18,7 @@ import (
 // createTestView creates and initializes the View for testing.
 func createTestView(t *testing.T) *View {
 	log := createTestLogger(t)
-	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log, nil)
+	manager := manager.NewViewManager(context.Background(), ui.NewApp(), log, nil)
 
 	// Create field management components
 	fieldCache := NewFieldCache()

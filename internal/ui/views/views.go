@@ -1,7 +1,6 @@
 package views
 
 import (
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -14,6 +13,7 @@ type View interface {
 	InputHandler() func(event *tcell.EventKey) *tcell.EventKey
 }
 
+// Reinitializer is implemented by views that survive profile switches.
 type Reinitializer interface {
-	Reinitialize(cfg aws.Config) error
+	Reinitialize() error
 }

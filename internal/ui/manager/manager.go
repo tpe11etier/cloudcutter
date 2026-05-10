@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/auth"
@@ -39,7 +38,6 @@ type Manager struct {
 	activeView        views.View
 	pages             *tview.Pages
 	layout            *tview.Flex
-	awsConfig         aws.Config
 	primitivesByID    map[string]tview.Primitive
 	logger            *logger.Logger
 	spinner           *spinner.Spinner
@@ -55,10 +53,6 @@ type Manager struct {
 	focusedComponentID string
 	profileHandler     *profile.Handler
 	resolver           *environments.Resolver
-}
-
-func (vm *Manager) GetCurrentConfig() aws.Config {
-	return vm.awsConfig
 }
 
 // CurrentSession returns the active auth session (nil before first profile
@@ -98,7 +92,7 @@ func (vm *Manager) Resolver() *environments.Resolver {
 	return vm.resolver
 }
 
-func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log *logger.Logger, resolver *environments.Resolver) *Manager {
+func NewViewManager(ctx context.Context, app *ui.App, log *logger.Logger, resolver *environments.Resolver) *Manager {
 	ctx, cancel := context.WithCancel(ctx)
 	vm := &Manager{
 		ctx:            ctx,
@@ -110,7 +104,6 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		statusBar:      statusbar.NewStatusBar(),
 		prompt:         components.NewPrompt(),
 		filterPrompt:   components.NewPrompt(),
-		awsConfig:      awsConfig,
 		primitivesByID: make(map[string]tview.Primitive),
 		StatusChan:     make(chan string, 10),
 		help:           help.NewHelp(),
@@ -607,7 +600,7 @@ func (vm *Manager) reinitializeViews() error {
 	if vm.activeView != nil {
 		activeName := vm.activeView.Name()
 		if reinitView, ok := vm.activeView.(views.Reinitializer); ok {
-			if err := reinitView.Reinitialize(vm.awsConfig); err != nil {
+			if err := reinitView.Reinitialize(); err != nil {
 				return fmt.Errorf("failed to reinitialize %s view: %w", activeName, err)
 			}
 		}
@@ -682,19 +675,18 @@ func (vm *Manager) startStatusListener() {
 	}()
 }
 
-func (vm *Manager) UpdateRegion(region string) error {
-	cfg := vm.awsConfig.Copy()
-	cfg.Region = region
-	vm.awsConfig = cfg
-
-	if err := vm.reinitializeActiveView(); err != nil {
-		vm.StatusChan <- fmt.Sprintf("Error reinitializing active view in new region: %v", err)
-		return err
-	}
-
+// UpdateRegion re-materializes the active environment against the new region.
+// For non-AWS environments the re-switch is a cheap no-op aside from the
+// header label change.
+func (vm *Manager) UpdateRegion(region string) {
+	vm.profileHandler.SetRegion(region)
 	vm.header.UpdateEnvVar("Region", region)
-	vm.StatusChan <- fmt.Sprintf("Switched region to %s (active view reinitialized)", region)
-	return nil
+
+	sess := vm.profileHandler.CurrentSession()
+	if sess != nil {
+		vm.switchToEnvironment(sess.Profile)
+		vm.StatusChan <- fmt.Sprintf("Switched region to %s", region)
+	}
 }
 
 func (vm *Manager) showCmdPrompt() {
@@ -745,19 +737,12 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 		func(region string) {
 			vm.pages.RemovePage("regionSelector")
 			vm.focusActiveView()
-
-			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
-			if err := vm.UpdateRegion(region); err != nil {
-				vm.StatusChan <- fmt.Sprintf("Error switching region: %v", err)
-			} else {
-				vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
-			}
+			vm.UpdateRegion(region)
 		},
 		func() {
 			vm.pages.RemovePage("regionSelector")
 			vm.focusActiveView()
 		},
-		vm.statusBar,
 		vm,
 	)
 
@@ -891,7 +876,6 @@ func (vm *Manager) switchToEnvironment(name string) {
 		}
 
 		vm.app.QueueUpdateDraw(func() {
-			vm.awsConfig = sess.Config
 			vm.header.UpdateEnvVar("Profile", sess.Environment.Name)
 			if sess.Environment.Auth.Type == "aws_sdk" {
 				vm.header.UpdateEnvVar("Region", sess.Environment.Region)
@@ -1059,7 +1043,7 @@ func (vm *Manager) reinitializeActiveView() error {
 		return nil
 	}
 	if reinit, ok := vm.activeView.(views.Reinitializer); ok {
-		return reinit.Reinitialize(vm.awsConfig)
+		return reinit.Reinitialize()
 	}
 	return nil
 }

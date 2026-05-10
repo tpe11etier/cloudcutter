@@ -2,13 +2,13 @@ package elastic
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components"
 	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
-	"strings"
 )
 
 type View struct {
@@ -196,7 +196,7 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	}
 }
 
-func (v *View) Reinitialize(cfg aws.Config) error {
+func (v *View) Reinitialize() error {
 	session := v.manager.CurrentSession()
 	if session == nil {
 		return fmt.Errorf("no active session")

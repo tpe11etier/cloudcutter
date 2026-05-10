@@ -7,19 +7,16 @@ import (
 	"os"
 	"strings"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tpe11etier/cloudcutter/internal/config"
 	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
-	"github.com/tpe11etier/cloudcutter/internal/ui/views"
-
-	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpe11etier/cloudcutter/internal/services"
 	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
 	"github.com/tpe11etier/cloudcutter/internal/ui"
 	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 	ddbv "github.com/tpe11etier/cloudcutter/internal/ui/views/dynamodb"
 	elasticView "github.com/tpe11etier/cloudcutter/internal/ui/views/elastic"
 )
@@ -75,12 +72,6 @@ func runApplication() {
 	}
 	defer logInstance.Close()
 
-	defaultConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion("us-west-2"))
-	if err != nil {
-		logInstance.Error("Failed to load default config", "error", err)
-		defaultConfig = awssdk.Config{}
-	}
-
 	configPath := config.DefaultConfigPath()
 	rawCfg, err := config.Load(configPath)
 	if err != nil {
@@ -97,15 +88,18 @@ func runApplication() {
 	awsProfiles, _ := environments.DiscoverAWSProfiles(homeDir)
 	resolver := environments.NewResolver(rawCfg, awsProfiles)
 
-	viewManager := manager.NewViewManager(ctx, app, defaultConfig, logInstance, resolver)
+	viewManager := manager.NewViewManager(ctx, app, logInstance, resolver)
 
 	viewManager.ShowProfileSelector()
 
 	// Register lazy views
 	services := services.New("us-west-2")
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
-		currentConfig := viewManager.GetCurrentConfig()
-		if err := services.InitializeDynamoDB(currentConfig); err != nil {
+		session := viewManager.CurrentSession()
+		if session == nil {
+			return nil, fmt.Errorf("no active session for dynamodb view")
+		}
+		if err := services.InitializeDynamoDB(session.Config); err != nil {
 			return nil, err
 		}
 		return ddbv.NewView(viewManager, services.DynamoDB), nil
