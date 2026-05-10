@@ -33,7 +33,7 @@ func TestNewProfileHandler(t *testing.T) {
 	assert.True(t, loadEndCalled)
 }
 
-func TestGetCurrentProfile(t *testing.T) {
+func TestCurrentSessionEmptyBeforeAuth(t *testing.T) {
 	authenticator, err := auth.New(func(status string) {})
 	assert.Nil(t, err)
 	ph := &Handler{
@@ -41,7 +41,7 @@ func TestGetCurrentProfile(t *testing.T) {
 		region: "us-west-2",
 	}
 
-	assert.Empty(t, ph.GetCurrentProfile())
+	assert.Nil(t, ph.CurrentSession())
 }
 
 func TestRegionOperations(t *testing.T) {

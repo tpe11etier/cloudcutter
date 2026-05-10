@@ -40,16 +40,9 @@ func (ph *Handler) sendStatus(status string) {
 	}
 }
 
-func (ph *Handler) GetCurrentProfile() string {
-	if session := ph.auth.Current(); session != nil {
-		return session.Profile
-	}
-	return ""
-}
-
 // CurrentSession returns the active auth session (or nil if not yet
-// authenticated). Used by views that need richer per-profile state than the
-// SwitchEnvironment callback exposes — notably the Dragos token/base URL.
+// authenticated). Used by views that need the resolved Environment, JWT,
+// or AWS credentials.
 func (ph *Handler) CurrentSession() *auth.Session {
 	return ph.auth.Current()
 }

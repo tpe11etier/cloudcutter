@@ -19,9 +19,8 @@ import (
 // applies any spec.Query params, and extracts the token per
 // spec.TokenExtract.
 //
-// Replaces the dragos-specific LoginWithPassword. The new function is
-// vendor-neutral: a future env can declare its own URL, body format,
-// query, and token extraction strategy without touching Go.
+// The function is vendor-neutral: each backend declares its own URL,
+// body format, query, and token-extraction strategy in YAML.
 func LoginJWT(ctx context.Context, spec config.LoginSpec, formValues map[string]string) (string, error) {
 	if spec.URL == "" {
 		return "", fmt.Errorf("login: spec.URL is empty")

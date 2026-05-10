@@ -711,10 +711,6 @@ func (vm *Manager) showCmdPrompt() {
 	vm.showModal(types.ModalCmdPrompt, vm.prompt, 50, 3)
 }
 
-func (vm *Manager) CurrentProfile() string {
-	return vm.profileHandler.GetCurrentProfile()
-}
-
 func (vm *Manager) HideFilterPrompt() {
 	vm.pages.RemovePage(types.ModalFilter)
 	if vm.activeView != nil {
@@ -928,11 +924,8 @@ func (vm *Manager) switchToEnvironment(name string) {
 // ShowJWTLoginModal opens a form derived from env.Auth.Login.BodyFields,
 // POSTs the submitted values via auth.LoginJWT, persists the resulting
 // token to env.Auth.Path, and calls onSuccess. Esc / Cancel calls
-// onCancel.
-//
-// Replaces the dragos-named ShowDragosLoginModal. All vendor-specific
-// knobs (URL, providerId, body fields, token extraction) come from
-// env.Auth.Login.
+// onCancel. Every backend-specific knob (URL, query params, body fields,
+// token extraction) comes from env.Auth.Login.
 func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess func(), onCancel func()) {
 	const pageName = "jwtLogin"
 
