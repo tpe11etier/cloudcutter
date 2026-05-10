@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-09
 **Branch**: `dragos-platform`
-**Status**: Phase 3 implemented (tag `phase-3-complete`). Phase 4 (manager + view cleanup) plan to be drafted next.
+**Status**: Phase 4 implemented (tag `phase-4-complete`). Phase 5 (delete legacy) plan to be drafted next.
 
 ## Problem
 
