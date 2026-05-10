@@ -105,6 +105,16 @@ func SaveDragosToken(token string, cfg DragosConfig) error {
 	if err := os.WriteFile(path, out, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+
+	// Also write the flat-file dragos.token alongside dragos.json. After
+	// phase 4, the runtime reads the JWT from auth.path (which the YAML
+	// points at dragos.token), not from the structured dragos.json. We
+	// keep dragos.json updated for backwards compat with phase-3-or-older
+	// binaries; phase 5 deletes the dragos.json write entirely.
+	tokenPath := filepath.Join(filepath.Dir(path), "dragos.token")
+	if err := os.WriteFile(tokenPath, []byte(strings.TrimSpace(token)), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tokenPath, err)
+	}
 	return nil
 }
 
