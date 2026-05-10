@@ -10,6 +10,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
 	"github.com/tpe11etier/cloudcutter/internal/ui"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components"
@@ -54,6 +55,7 @@ type Manager struct {
 	StatusChan         chan string
 	focusedComponentID string
 	profileHandler     *profile.Handler
+	resolver           *environments.Resolver
 }
 
 func (vm *Manager) GetCurrentConfig() aws.Config {
@@ -91,7 +93,13 @@ func (vm *Manager) ActiveView() tview.Primitive {
 	return vm.activeView.Content()
 }
 
-func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log *logger.Logger) *Manager {
+// Resolver returns the environments.Resolver. May be nil if the binary was
+// constructed without one (only happens in tests today).
+func (vm *Manager) Resolver() *environments.Resolver {
+	return vm.resolver
+}
+
+func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log *logger.Logger, resolver *environments.Resolver) *Manager {
 	ctx, cancel := context.WithCancel(ctx)
 	vm := &Manager{
 		ctx:            ctx,
@@ -108,6 +116,7 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		StatusChan:     make(chan string, 10),
 		help:           help.NewHelp(),
 		logger:         log,
+		resolver:       resolver,
 	}
 
 	var err error

@@ -19,7 +19,7 @@ import (
 // createTestView creates and initializes the View for testing.
 func createTestView(t *testing.T) *View {
 	log := createTestLogger(t)
-	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log)
+	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log, nil)
 
 	// Create field management components
 	fieldCache := NewFieldCache()

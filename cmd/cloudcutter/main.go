@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tpe11etier/cloudcutter/internal/config"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/logger"
 	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 
@@ -79,7 +80,23 @@ func runApplication() {
 		defaultConfig = awssdk.Config{}
 	}
 
-	viewManager := manager.NewViewManager(ctx, app, defaultConfig, logInstance)
+	configPath := config.DefaultConfigPath()
+	rawCfg, err := config.Load(configPath)
+	if err != nil {
+		logInstance.Error("Failed to load config", "path", configPath, "error", err)
+		fmt.Fprintf(os.Stderr, "cloudcutter: failed to load %s: %v\n", configPath, err)
+		os.Exit(1)
+	}
+	if err := config.Validate(rawCfg); err != nil {
+		logInstance.Error("Config validation failed", "error", err)
+		fmt.Fprintf(os.Stderr, "cloudcutter: config validation: %v\n", err)
+		os.Exit(1)
+	}
+	homeDir, _ := os.UserHomeDir()
+	awsProfiles, _ := environments.DiscoverAWSProfiles(homeDir)
+	resolver := environments.NewResolver(rawCfg, awsProfiles)
+
+	viewManager := manager.NewViewManager(ctx, app, defaultConfig, logInstance, resolver)
 
 	viewManager.ShowProfileSelector()
 
