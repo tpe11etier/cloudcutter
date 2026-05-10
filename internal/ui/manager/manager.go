@@ -988,6 +988,86 @@ func (vm *Manager) switchToStandardProfile(profile string) {
 	})
 }
 
+// switchToEnvironment is the unified profile-switch entry point introduced
+// in phase 4. Resolves the named environment via the YAML resolver,
+// materializes it with the current region, and dispatches via
+// profileHandler.SwitchEnvironment. The callback updates the header,
+// reinitializes the active view, and (for jwt environments) pops the
+// login modal on auth failure.
+func (vm *Manager) switchToEnvironment(name string) {
+	if vm.resolver == nil {
+		vm.StatusChan <- "Configuration error: no environment resolver"
+		return
+	}
+	if vm.profileHandler.IsAuthenticating() {
+		vm.StatusChan <- "Authentication already in progress"
+		return
+	}
+
+	spec, err := vm.resolver.Resolve(name)
+	if err != nil {
+		vm.StatusChan <- fmt.Sprintf("Resolve %q: %v", name, err)
+		return
+	}
+
+	region := vm.profileHandler.GetRegion()
+	env, err := environments.Materialize(spec, region)
+	if err != nil {
+		vm.StatusChan <- fmt.Sprintf("Materialize %q: %v", name, err)
+		return
+	}
+
+	// Dragos-style jwt environments need the login modal popped on auth
+	// failure if the user has no token cached. Detect this before invoking
+	// SwitchEnvironment so the modal appears with no detour through a
+	// status-bar error.
+	needsLoginModal := env.Auth.Type == "jwt" && env.Auth.Login != nil
+
+	vm.profileHandler.SwitchEnvironment(vm.ctx, env, func(sess *auth.Session, err error) {
+		if err != nil {
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Auth failed: %v", err))
+				if needsLoginModal {
+					vm.ShowDragosLoginModal(
+						func() { vm.switchToEnvironment(name) },
+						func() { vm.StatusChan <- "Auth canceled" },
+					)
+				}
+			})
+			return
+		}
+
+		vm.app.QueueUpdateDraw(func() {
+			vm.awsConfig = sess.Config
+			vm.header.UpdateEnvVar("Profile", sess.Environment.Name)
+			if sess.Environment.Auth.Type == "aws_sdk" {
+				vm.header.UpdateEnvVar("Region", sess.Environment.Region)
+			} else {
+				vm.header.UpdateEnvVar("Region", "—")
+			}
+		})
+
+		if err := vm.reinitializeActiveView(); err != nil {
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Reinit failed: %v", err))
+				if needsLoginModal {
+					vm.ShowDragosLoginModal(
+						func() { vm.switchToEnvironment(name) },
+						func() { vm.StatusChan <- "Auth canceled" },
+					)
+				}
+			})
+			return
+		}
+
+		if err := vm.SwitchToView(ViewElastic); err != nil {
+			vm.Logger().Error("Failed to switch to Elastic", "error", err)
+		}
+
+		vm.StatusChan <- fmt.Sprintf("Switched to %s", sess.Environment.Name)
+	})
+}
+
 // switchToDragosProfile authenticates the dragos profile. If no token is
 // resolvable (or the existing one fails the probe), pops the login modal so
 // the user can sign in with username + password.
