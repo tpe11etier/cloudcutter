@@ -1,13 +1,11 @@
 package profile
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/tpe11etier/cloudcutter/internal/auth"
 	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
@@ -81,28 +79,6 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 
 	selector.SetCurrentItem(0)
 	return selector
-}
-
-func (ps *Selector) switchProfile(profile string) {
-	// Dragos has its own login flow (modal asking for username/password);
-	// the manager handles auth itself. If we called ph.SwitchProfile here it
-	// would synchronously fail for any user without a token cached, the
-	// picker would show "auth failed" in the status bar, and onSelect would
-	// never fire — so the manager's modal-triggering code would never run.
-	if profile == auth.DragosProfile {
-		ps.onSelect(profile)
-		return
-	}
-
-	ps.statusBar.SetText("Switching profile...")
-	ps.ph.SwitchProfile(context.Background(), profile, func(cfg aws.Config, err error) {
-		if err != nil {
-			ps.statusBar.SetText(err.Error())
-			return
-		}
-		ps.statusBar.SetText("Profile switched successfully")
-		ps.onSelect(profile)
-	})
 }
 
 func (ps *Selector) ShowSelector() (tview.Primitive, error) {

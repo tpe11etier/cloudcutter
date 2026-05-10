@@ -95,28 +95,6 @@ func (a *Authenticator) sendStatus(status string) {
 	}
 }
 
-// SwitchProfile is the legacy entry point: callers pass a profile name and
-// region, and SwitchProfile builds the corresponding Environment from
-// legacy config sources (~/.cloudcutter/dragos.json, the opal profile map,
-// env vars) and delegates to SwitchEnvironment.
-//
-// Phase 4 deletes this method when callers switch to SwitchEnvironment
-// directly.
-func (a *Authenticator) SwitchProfile(ctx context.Context, profile, region string) (*Session, error) {
-	a.mu.RLock()
-	cached := a.currentSession
-	a.mu.RUnlock()
-	if cached != nil && cached.Profile == profile && cached.Region == region {
-		return cached, nil
-	}
-
-	env, err := a.legacyToEnvironment(profile, region)
-	if err != nil {
-		return nil, err
-	}
-	return a.SwitchEnvironment(ctx, env)
-}
-
 func (a *Authenticator) authenticateStandard(ctx context.Context, profile, region string) (aws.Config, error) {
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
@@ -130,12 +108,7 @@ func (a *Authenticator) authenticateStandard(ctx context.Context, profile, regio
 }
 
 // SwitchEnvironment authenticates using the given Environment and returns
-// the resulting Session. Unlike SwitchProfile (which keys off a profile
-// name), SwitchEnvironment dispatches on env.Auth.Type.
-//
-// SwitchEnvironment is the new dispatch surface introduced in phase 2.
-// Phase 4 is when the manager calls it directly; until then, SwitchProfile
-// translates legacy profile names into Environment values and delegates.
+// the resulting Session. Dispatches on env.Auth.Type (none, aws_sdk, jwt).
 func (a *Authenticator) SwitchEnvironment(ctx context.Context, env environments.Environment) (*Session, error) {
 	a.mu.Lock()
 	if a.isAuthenticating {
