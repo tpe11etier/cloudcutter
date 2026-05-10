@@ -218,17 +218,17 @@ func TestAuthenticateErrorHandling(t *testing.T) {
 func TestErrorMessageQuality(t *testing.T) {
 	// Test that our error messages are user-friendly and actionable
 	tests := []struct {
-		name           string
-		inputError     error
-		checkMessage   func(string) bool
-		description    string
+		name         string
+		inputError   error
+		checkMessage func(string) bool
+		description  string
 	}{
 		{
 			name:       "expired token message is actionable",
 			inputError: MockAPIError{Code: "ExpiredToken", Message: "Token expired"},
 			checkMessage: func(msg string) bool {
 				return assert.Contains(t, msg, "refresh") &&
-					   assert.Contains(t, msg, "expired")
+					assert.Contains(t, msg, "expired")
 			},
 			description: "should tell user to refresh expired token",
 		},
@@ -237,7 +237,7 @@ func TestErrorMessageQuality(t *testing.T) {
 			inputError: MockAPIError{Code: "InvalidClientTokenId", Message: "Invalid token"},
 			checkMessage: func(msg string) bool {
 				return assert.Contains(t, msg, "invalid") &&
-					   assert.Contains(t, msg, "credentials")
+					assert.Contains(t, msg, "credentials")
 			},
 			description: "should clearly indicate credential problems",
 		},

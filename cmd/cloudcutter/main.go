@@ -102,7 +102,7 @@ func runApplication() {
 	viewManager.ShowProfileSelector()
 
 	// Register lazy views
-	services, _ := services.New(defaultConfig, "us-west-2")
+	services := services.New("us-west-2")
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
 		currentConfig := viewManager.GetCurrentConfig()
 		if err := services.InitializeDynamoDB(currentConfig); err != nil {

@@ -958,7 +958,6 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 	return result.String()
 }
 
-
 // scrollToShowCursor ensures the cursor position is visible in the textView
 func (m *EnhancedJSONModal) scrollToShowCursor() {
 	if len(m.lines) == 0 {

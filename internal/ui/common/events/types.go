@@ -73,17 +73,17 @@ type KeyMapping struct {
 
 // EventContext provides rich context for event processing
 type EventContext struct {
-	Event        *tcell.EventKey    `json:"event"`
-	CurrentFocus tview.Primitive    `json:"-"`
-	Component    *ComponentType     `json:"component"`
-	Timestamp    time.Time          `json:"timestamp"`
-	TraceID      string             `json:"trace_id"`
-	SessionID    string             `json:"session_id"`
-	Metadata     map[string]any     `json:"metadata"`
-	Action       *KeyAction         `json:"action,omitempty"`
-	Result       EventResult        `json:"result"`
-	Duration     time.Duration      `json:"duration"`
-	Error        error              `json:"error,omitempty"`
+	Event        *tcell.EventKey `json:"event"`
+	CurrentFocus tview.Primitive `json:"-"`
+	Component    *ComponentType  `json:"component"`
+	Timestamp    time.Time       `json:"timestamp"`
+	TraceID      string          `json:"trace_id"`
+	SessionID    string          `json:"session_id"`
+	Metadata     map[string]any  `json:"metadata"`
+	Action       *KeyAction      `json:"action,omitempty"`
+	Result       EventResult     `json:"result"`
+	Duration     time.Duration   `json:"duration"`
+	Error        error           `json:"error,omitempty"`
 }
 
 // EventMiddleware provides a way to intercept and modify event processing
@@ -115,15 +115,15 @@ type HandlerManager interface {
 
 // EventMetrics tracks event handling performance and patterns
 type EventMetrics struct {
-	TotalEvents       int64                       `json:"total_events"`
-	HandledEvents     int64                       `json:"handled_events"`
-	UnhandledEvents   int64                       `json:"unhandled_events"`
-	ErrorCount        int64                       `json:"error_count"`
-	AverageDuration   time.Duration               `json:"average_duration"`
-	ComponentMetrics  map[ComponentType]*ComponentMetrics `json:"component_metrics"`
-	ActionMetrics     map[ActionType]*ActionMetrics       `json:"action_metrics"`
-	KeyMetrics        map[string]*KeyMetrics              `json:"key_metrics"`
-	EventHistory      []*EventContext             `json:"event_history"`
+	TotalEvents      int64                               `json:"total_events"`
+	HandledEvents    int64                               `json:"handled_events"`
+	UnhandledEvents  int64                               `json:"unhandled_events"`
+	ErrorCount       int64                               `json:"error_count"`
+	AverageDuration  time.Duration                       `json:"average_duration"`
+	ComponentMetrics map[ComponentType]*ComponentMetrics `json:"component_metrics"`
+	ActionMetrics    map[ActionType]*ActionMetrics       `json:"action_metrics"`
+	KeyMetrics       map[string]*KeyMetrics              `json:"key_metrics"`
+	EventHistory     []*EventContext                     `json:"event_history"`
 }
 
 // ComponentMetrics tracks metrics for specific components

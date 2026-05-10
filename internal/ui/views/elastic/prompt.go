@@ -83,4 +83,3 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 	v.manager.Pages().AddPage(types.ModalFilter, promptLayout, true, true)
 	v.manager.App().SetFocus(v.components.filterPrompt.InputField)
 }
-

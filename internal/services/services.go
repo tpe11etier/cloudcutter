@@ -7,18 +7,15 @@ import (
 )
 
 type Services struct {
-	DynamoDB    dynamodb.Interface
-	Elastic     *elastic.Service
-	Region      string
-	currentView string
+	DynamoDB dynamodb.Interface
+	Elastic  *elastic.Service
+	Region   string
 }
 
-func New(cfg aws.Config, region string) (*Services, error) {
-	cfg.Region = region
-
+func New(region string) *Services {
 	return &Services{
 		Region: region,
-	}, nil
+	}
 }
 
 func (s *Services) InitializeDynamoDB(cfg aws.Config) error {
