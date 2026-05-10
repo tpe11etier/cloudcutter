@@ -118,9 +118,9 @@ func TestKibanaProxyTransportRetriesOn401WithFreshToken(t *testing.T) {
 	}
 
 	spec := config.TransportSpec{
-		Type:      "kibana_proxy",
-		BaseURL:   srv.URL,
-		ProxyPath: "/p",
+		Type:        "kibana_proxy",
+		BaseURL:     srv.URL,
+		ProxyPath:   "/p",
 		TokenHeader: &config.TokenHeaderSpec{Name: "Cookie", Format: "x={token}"},
 	}
 	tr := newKibanaProxyTransport(spec, "stale-jwt", refresh)
@@ -159,9 +159,9 @@ func TestKibanaProxyTransportNoRetryWhenRefreshReturnsSameToken(t *testing.T) {
 	}
 
 	spec := config.TransportSpec{
-		Type:      "kibana_proxy",
-		BaseURL:   srv.URL,
-		ProxyPath: "/p",
+		Type:        "kibana_proxy",
+		BaseURL:     srv.URL,
+		ProxyPath:   "/p",
 		TokenHeader: &config.TokenHeaderSpec{Name: "Cookie", Format: "x={token}"},
 	}
 	tr := newKibanaProxyTransport(spec, "stale-jwt", refresh)
@@ -185,9 +185,9 @@ func TestKibanaProxyTransportNoRefreshConfigured(t *testing.T) {
 	defer srv.Close()
 
 	spec := config.TransportSpec{
-		Type:      "kibana_proxy",
-		BaseURL:   srv.URL,
-		ProxyPath: "/p",
+		Type:        "kibana_proxy",
+		BaseURL:     srv.URL,
+		ProxyPath:   "/p",
 		TokenHeader: &config.TokenHeaderSpec{Name: "Cookie", Format: "x={token}"},
 	}
 	tr := newKibanaProxyTransport(spec, "stale-jwt", nil)
@@ -213,9 +213,9 @@ func TestKibanaProxyTransportContentTypeDefaultsToJSON(t *testing.T) {
 	defer srv.Close()
 
 	spec := config.TransportSpec{
-		Type:      "kibana_proxy",
-		BaseURL:   srv.URL,
-		ProxyPath: "/p",
+		Type:        "kibana_proxy",
+		BaseURL:     srv.URL,
+		ProxyPath:   "/p",
 		TokenHeader: &config.TokenHeaderSpec{Name: "Cookie", Format: "x={token}"},
 		// No "Content-Type" key in Headers — transport should default.
 	}
