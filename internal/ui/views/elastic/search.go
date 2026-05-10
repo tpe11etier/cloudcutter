@@ -401,8 +401,11 @@ func (v *View) buildQuery() map[string]any {
 	v.state.mu.RUnlock()
 
 	timeFields := DefaultTimeFields
-	if session := v.manager.CurrentSession(); session != nil && session.Dragos != nil {
-		timeFields = DragosTimeFields
+	if session := v.manager.CurrentSession(); session != nil && len(session.Environment.TimeFields) > 0 {
+		timeFields = make([]TimeField, len(session.Environment.TimeFields))
+		for i, tf := range session.Environment.TimeFields {
+			timeFields[i] = TimeField{Name: tf.Name, Format: tf.Format}
+		}
 	}
 
 	query, err := BuildQueryWithTimeAndFields(filters, numResults, timeframe, time.Now(), v.state.data.fieldCache, timeFields)
