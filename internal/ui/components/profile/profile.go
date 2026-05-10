@@ -1,16 +1,11 @@
 package profile
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/tpe11etier/cloudcutter/internal/auth"
 	"github.com/tpe11etier/cloudcutter/internal/environments"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
 	"github.com/tpe11etier/cloudcutter/internal/ui/style"
-	"gopkg.in/ini.v1"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -95,37 +90,4 @@ func (ps *Selector) ShowSelector() (tview.Primitive, error) {
 
 	ps.manager.Pages().AddPage("profileSelector", modal, true, true)
 	return ps, nil
-}
-
-func (ps *Selector) discoverProfiles() []string {
-	homedir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	profileMap := make(map[string]struct{})
-
-	// Load profiles from credentials file
-	credFile := filepath.Join(homedir, ".aws", "credentials")
-	if readCfg, err := ini.Load(credFile); err == nil {
-		for _, section := range readCfg.Sections() {
-			name := section.Name()
-			if name != ini.DefaultSection {
-				name = strings.TrimPrefix(name, "profile")
-				profileMap[name] = struct{}{}
-			}
-		}
-	}
-
-	// add local profile to connect to local Docker instance
-	profileMap["local"] = struct{}{}
-	profileMap[auth.DragosProfile] = struct{}{}
-	// Convert map to sorted slice
-	profiles := make([]string, 0, len(profileMap))
-	for profile := range profileMap {
-		profiles = append(profiles, profile)
-	}
-	sort.Strings(profiles)
-
-	return profiles
 }
