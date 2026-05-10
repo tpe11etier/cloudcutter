@@ -1,28 +1,25 @@
 package region
 
 import (
-	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
 )
 
 type ManagerInterface interface {
 	Pages() *tview.Pages
 	App() *tview.Application
 	ActiveView() tview.Primitive
-	UpdateRegion(region string) error
+	UpdateRegion(region string)
 }
 
 type RegionSelector struct {
 	*tview.List
-	onSelect  func(string)
-	onCancel  func()
-	statusBar *statusbar.StatusBar
-	manager   ManagerInterface
+	onSelect func(string)
+	onCancel func()
+	manager  ManagerInterface
 }
 
-func NewRegionSelector(onSelect func(string), onCancel func(), statusBar *statusbar.StatusBar, manager ManagerInterface) *RegionSelector {
+func NewRegionSelector(onSelect func(string), onCancel func(), manager ManagerInterface) *RegionSelector {
 	regions := []string{
 		"us-east-1",      // US East (N. Virginia)
 		"us-east-2",      // US East (Ohio)
@@ -36,11 +33,10 @@ func NewRegionSelector(onSelect func(string), onCancel func(), statusBar *status
 	}
 
 	selector := &RegionSelector{
-		List:      tview.NewList().ShowSecondaryText(false),
-		onSelect:  onSelect,
-		onCancel:  onCancel,
-		statusBar: statusBar,
-		manager:   manager,
+		List:     tview.NewList().ShowSecondaryText(false),
+		onSelect: onSelect,
+		onCancel: onCancel,
+		manager:  manager,
 	}
 
 	selector.SetBorder(true)
@@ -55,9 +51,7 @@ func NewRegionSelector(onSelect func(string), onCancel func(), statusBar *status
 	selector.SetSelectedFunc(func(index int, name string, secondName string, shortcut rune) {
 		if selector.onSelect != nil {
 			go func() {
-				if err := selector.manager.UpdateRegion(name); err != nil {
-					selector.statusBar.SetText(fmt.Sprintf("Error switching region: %v", err))
-				}
+				selector.manager.UpdateRegion(name)
 			}()
 		}
 		selector.HideRegionSelector()

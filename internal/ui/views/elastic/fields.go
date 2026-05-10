@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
+	"github.com/tpe11etier/cloudcutter/internal/ui/help"
 	"sort"
 	"strings"
 	"sync"
@@ -34,12 +34,6 @@ type FieldState struct {
 
 	// Ordered list of selected fields (maintains display order)
 	fieldOrder []string
-
-	// Current filter being applied
-	currentFilter string
-
-	// Fields matching current filter
-	filteredFields []string
 
 	// Reference to field cache for metadata access
 	fieldCache *FieldCache
@@ -179,8 +173,9 @@ func (v *View) updateFieldsFromResults(results []*DocEntry) {
 		return
 	}
 
-	// Update the field state with new document fields
-	v.state.data.fieldState.UpdateFromDocuments(results)
+	if !v.state.data.fieldState.UpdateFromDocuments(results) {
+		return
+	}
 
 	v.manager.App().QueueUpdateDraw(func() {
 		v.rebuildFieldList()
@@ -382,12 +377,11 @@ func (fs *FieldState) Reset() {
 	fs.discoveredFields = make(map[string]struct{})
 	fs.selectedFields = make(map[string]struct{})
 	fs.fieldOrder = make([]string, 0)
-	fs.currentFilter = ""
-	fs.filteredFields = nil
 }
 
-// UpdateFromDocuments updates discovered fields from document results
-func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) {
+// UpdateFromDocuments updates discovered fields from document results.
+// Returns true when the field set changed and the UI needs a rebuild.
+func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) bool {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -399,7 +393,6 @@ func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) {
 		}
 	}
 
-	// Check if fields have changed
 	if len(newFields) == len(fs.discoveredFields) {
 		allMatch := true
 		for field := range fs.discoveredFields {
@@ -409,19 +402,19 @@ func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) {
 			}
 		}
 		if allMatch {
-			return
+			return false
 		}
 	}
 
 	fs.discoveredFields = newFields
 
-	// Clean up selected fields that no longer exist
 	for field := range fs.selectedFields {
 		if _, ok := newFields[field]; !ok {
 			delete(fs.selectedFields, field)
 			fs.fieldOrder = removeString(fs.fieldOrder, field)
 		}
 	}
+	return true
 }
 
 // GetDiscoveredFields returns a sorted list of all discovered fields
@@ -512,38 +505,24 @@ func (fs *FieldState) GetOrderedSelectedFields() []string {
 	return result
 }
 
-// ApplyFilter updates filtered fields based on search string
+// ApplyFilter returns the sorted available-fields list filtered by a
+// case-insensitive substring match. Selected fields are excluded.
 func (fs *FieldState) ApplyFilter(filter string) []string {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
 
-	fs.currentFilter = filter
-
-	if filter == "" {
-		fs.filteredFields = nil
-		discovered := make([]string, 0, len(fs.discoveredFields))
-		for field := range fs.discoveredFields {
-			if _, isSelected := fs.selectedFields[field]; !isSelected {
-				discovered = append(discovered, field)
-			}
-		}
-		sort.Strings(discovered)
-		return discovered
-	}
-
-	filter = strings.ToLower(filter)
-	var matched []string
-
+	needle := strings.ToLower(filter)
+	matched := make([]string, 0, len(fs.discoveredFields))
 	for field := range fs.discoveredFields {
-		if _, isSelected := fs.selectedFields[field]; !isSelected {
-			if strings.Contains(strings.ToLower(field), filter) {
-				matched = append(matched, field)
-			}
+		if _, isSelected := fs.selectedFields[field]; isSelected {
+			continue
 		}
+		if needle != "" && !strings.Contains(strings.ToLower(field), needle) {
+			continue
+		}
+		matched = append(matched, field)
 	}
-
 	sort.Strings(matched)
-	fs.filteredFields = matched
 	return matched
 }
 

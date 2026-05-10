@@ -6,10 +6,10 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/header"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/help"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 func (v *View) setupLayout() {
@@ -270,6 +270,14 @@ func (v *View) setupLayout() {
 									OnBlur: func(list *tview.List) {
 										list.SetBorderColor(tcell.ColorBeige)
 									},
+									OnChanged: func(_ int, mainText string, _ string, _ rune) {
+										// Long field names are clipped to the panel
+										// width; mirror the focused name to the status
+										// bar so the full value is always visible.
+										if mainText != "" {
+											v.manager.UpdateStatusBar(mainText)
+										}
+									},
 								},
 							},
 							{
@@ -293,6 +301,11 @@ func (v *View) setupLayout() {
 									},
 									OnBlur: func(list *tview.List) {
 										list.SetBorderColor(tcell.ColorBeige)
+									},
+									OnChanged: func(_ int, mainText string, _ string, _ rune) {
+										if mainText != "" {
+											v.manager.UpdateStatusBar(mainText)
+										}
 									},
 								},
 							},

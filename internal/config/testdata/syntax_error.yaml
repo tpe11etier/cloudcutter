@@ -1,0 +1,6 @@
+environments:
+  - name: dragos
+    auth:
+      type: jwt
+    transport
+      type: plain

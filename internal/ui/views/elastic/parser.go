@@ -23,6 +23,27 @@ func (e *ParseError) Error() string {
 	return fmt.Sprintf("parse error on field '%s': %s", e.Field, e.Message)
 }
 
+// TimeField describes one timestamp field that the timeframe filter should
+// match against. Different ES backends store time differently — Sophos uses
+// `unixTime` (seconds) and `detectionGeneratedTime` (milliseconds); Dragos
+// uses `createdAt` (ISO 8601 date string).
+type TimeField struct {
+	Name   string
+	Format string // "unix" | "unix_ms" | "date"
+}
+
+// DefaultTimeFields are the Sophos darkbytes timestamps. Used when no fields
+// are passed explicitly so legacy callers and tests behave the same.
+var DefaultTimeFields = []TimeField{
+	{Name: "unixTime", Format: "unix"},
+	{Name: "detectionGeneratedTime", Format: "unix_ms"},
+}
+
+// DragosTimeFields are the timestamps used by the Dragos `events*` index.
+var DragosTimeFields = []TimeField{
+	{Name: "createdAt", Format: "date"},
+}
+
 // BuildQuery combines multiple filters into one Elasticsearch bool-query with error handling
 func BuildQuery(filters []string, size int, timeframe string, fieldCache *FieldCache) (map[string]any, error) {
 	return BuildQueryWithTime(filters, size, timeframe, time.Now(), fieldCache)
@@ -30,29 +51,29 @@ func BuildQuery(filters []string, size int, timeframe string, fieldCache *FieldC
 
 // BuildQueryWithTime is like BuildQuery but accepts a specific time for testing
 func BuildQueryWithTime(filters []string, size int, timeframe string, now time.Time, fieldCache *FieldCache) (map[string]any, error) {
+	return BuildQueryWithTimeAndFields(filters, size, timeframe, now, fieldCache, DefaultTimeFields)
+}
+
+// BuildQueryWithTimeAndFields is like BuildQueryWithTime but uses an explicit
+// set of time fields for the range filter — the only knob that varies between
+// the Sophos and Dragos backends.
+func BuildQueryWithTimeAndFields(filters []string, size int, timeframe string, now time.Time, fieldCache *FieldCache, timeFields []TimeField) (map[string]any, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("size must be non-negative, got %d", size)
 	}
 
-	// We'll store timeframe + any user filters in mustClauses
 	var mustClauses []map[string]any
 
-	// If timeframe is set, build a timeframe clause
 	if timeframe != "" {
-		timeQuery, err := BuildTimeQuery(timeframe, now)
+		timeQuery, err := BuildTimeQueryWithFields(timeframe, now, timeFields)
 		if err != nil {
 			return nil, fmt.Errorf("error building time query: %v", err)
 		}
 		if timeQuery != nil {
 			mustClauses = append(mustClauses, timeQuery)
-			// Log success to help debug
-		} else {
-			// This should never happen - log error
-			return nil, fmt.Errorf("BuildTimeQuery returned nil for timeframe='%s'", timeframe)
 		}
 	}
 
-	// Process user filters
 	var parseErrors []string
 	for i, f := range filters {
 		clause, err := ParseFilter(f, fieldCache)
@@ -95,9 +116,17 @@ func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) 
 		return nil, &ParseError{Field: "", Message: "empty filter"}
 	}
 
-	// Handle special case for _id field
+	// _id supports wildcards (`*`, `?`). The `ids` query is exact-match
+	// only, so route wildcard values through `wildcard` instead.
 	if strings.HasPrefix(filter, "_id=") {
 		value := strings.TrimSpace(strings.TrimPrefix(filter, "_id="))
+		if strings.ContainsAny(value, "*?") {
+			return map[string]any{
+				"wildcard": map[string]any{
+					"_id": map[string]any{"value": value},
+				},
+			}, nil
+		}
 		return map[string]any{
 			"ids": map[string]any{
 				"values": []string{value},
@@ -287,44 +316,72 @@ func ParseTimeframe(timeframe string) (time.Duration, error) {
 	}
 }
 
-// BuildTimeQuery creates an Elasticsearch time range query based on the timeframe
+// BuildTimeQuery creates an Elasticsearch time range query based on the
+// timeframe, using DefaultTimeFields. Kept for backward compatibility with
+// callers and tests that don't care which fields are used.
 func BuildTimeQuery(timeframe string, now time.Time) (map[string]interface{}, error) {
+	return BuildTimeQueryWithFields(timeframe, now, DefaultTimeFields)
+}
+
+// BuildTimeQueryWithFields creates a bool/should range query across an
+// explicit set of timestamp fields.
+func BuildTimeQueryWithFields(timeframe string, now time.Time, fields []TimeField) (map[string]interface{}, error) {
 	if timeframe == "" {
 		return nil, nil
 	}
-
 	if err := ValidateTimeframe(timeframe); err != nil {
 		return nil, err
 	}
-
 	duration, err := ParseTimeframe(timeframe)
 	if err != nil {
 		return nil, err
 	}
+	if len(fields) == 0 {
+		fields = DefaultTimeFields
+	}
 
 	unixTime := now.Unix()
 	unixMilliTime := now.UnixMilli()
+	isoNow := now.UTC().Format("2006-01-02T15:04:05.000Z")
+	isoStart := now.UTC().Add(-duration).Format("2006-01-02T15:04:05.000Z")
+
+	var should []map[string]interface{}
+	for _, f := range fields {
+		var rangeBody map[string]interface{}
+		switch f.Format {
+		case "unix":
+			rangeBody = map[string]interface{}{
+				"gte": unixTime - int64(duration.Seconds()),
+				"lte": unixTime,
+			}
+		case "unix_ms":
+			rangeBody = map[string]interface{}{
+				"gte": unixMilliTime - int64(duration.Milliseconds()),
+				"lte": unixMilliTime,
+			}
+		case "date":
+			rangeBody = map[string]interface{}{
+				"format": "strict_date_optional_time",
+				"gte":    isoStart,
+				"lte":    isoNow,
+			}
+		default:
+			continue
+		}
+		should = append(should, map[string]interface{}{
+			"range": map[string]interface{}{
+				f.Name: rangeBody,
+			},
+		})
+	}
+
+	if len(should) == 0 {
+		return nil, nil
+	}
 
 	return map[string]interface{}{
 		"bool": map[string]interface{}{
-			"should": []map[string]interface{}{
-				{
-					"range": map[string]interface{}{
-						"unixTime": map[string]interface{}{
-							"gte": unixTime - int64(duration.Seconds()),
-							"lte": unixTime,
-						},
-					},
-				},
-				{
-					"range": map[string]interface{}{
-						"detectionGeneratedTime": map[string]interface{}{
-							"gte": unixMilliTime - int64(duration.Milliseconds()),
-							"lte": unixMilliTime,
-						},
-					},
-				},
-			},
+			"should":               should,
 			"minimum_should_match": 1,
 		},
 	}, nil

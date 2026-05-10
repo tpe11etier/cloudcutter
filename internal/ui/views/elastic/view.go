@@ -2,13 +2,13 @@ package elastic
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	"strings"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 )
 
 type View struct {
@@ -196,30 +196,37 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 	}
 }
 
-func (v *View) Reinitialize(cfg aws.Config) error {
-	if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
+func (v *View) Reinitialize() error {
+	session := v.manager.CurrentSession()
+	if session == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	if err := v.service.ReinitializeFromEnv(session.Environment, session.Config, session.Token); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
 		return err
 	}
 
-	if cfg.Region == "local" {
-		v.components.timeframeInput.SetText("")
+	v.state.mu.Lock()
+	if pattern := session.Environment.IndexPattern; pattern != "" {
+		v.state.search.currentIndex = pattern
+	}
+	if session.Environment.Auth.Type == "none" {
 		v.state.search.timeframe = ""
 	}
-
-	v.state.mu.Lock()
-	// Reset field management
 	v.state.data.fieldCache = NewFieldCache()
 	v.state.data.fieldState = NewFieldState(v.state.data.fieldCache)
 	v.state.mu.Unlock()
 
 	v.manager.App().QueueUpdateDraw(func() {
-		v.components.fieldList.Clear()
-		v.components.selectedList.Clear()
-		v.manager.SetFocus(v.components.filterInput)
+		if session.Environment.Auth.Type == "none" {
+			v.components.timeframeInput.SetText("")
+		}
+		if pattern := session.Environment.IndexPattern; pattern != "" && v.components.indexInput != nil {
+			v.components.indexInput.SetText(pattern)
+		}
 	})
 
-	// Load fields and rebuild UI
 	if err := v.loadFields(); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
 		return err

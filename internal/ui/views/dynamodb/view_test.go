@@ -8,8 +8,8 @@ package dynamodb
 //	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 //	"github.com/rivo/tview"
 //	"github.com/stretchr/testify/assert"
-//	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-//	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+//	"github.com/tpe11etier/cloudcutter/internal/ui"
+//	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 //	"testing"
 //	"time"
 //)

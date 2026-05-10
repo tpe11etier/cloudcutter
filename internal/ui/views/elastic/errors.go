@@ -1,7 +1,7 @@
 package elastic
 
 import (
-	commonErrors "github.com/tpelletiersophos/cloudcutter/internal/ui/common/errors"
+	commonErrors "github.com/tpe11etier/cloudcutter/internal/ui/common/errors"
 )
 
 // Elastic-specific error handler that extends the common error handler

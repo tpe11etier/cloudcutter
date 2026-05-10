@@ -1,7 +1,7 @@
 package dynamodb
 
 import (
-	commonErrors "github.com/tpelletiersophos/cloudcutter/internal/ui/common/errors"
+	commonErrors "github.com/tpe11etier/cloudcutter/internal/ui/common/errors"
 )
 
 // DynamoDBErrorHandler extends the common error handler for DynamoDB-specific operations

@@ -6,20 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
 )
 
 // createTestView creates and initializes the View for testing.
 func createTestView(t *testing.T) *View {
 	log := createTestLogger(t)
-	manager := manager.NewViewManager(context.Background(), ui.NewApp(), aws.Config{}, log)
+	manager := manager.NewViewManager(context.Background(), ui.NewApp(), log, nil)
 
 	// Create field management components
 	fieldCache := NewFieldCache()
@@ -44,10 +43,10 @@ func createTestView(t *testing.T) *View {
 				fieldListFilter: "",
 			},
 			data: DataState{
-				fieldCache: fieldCache,
-				fieldState: fieldState,
-				filters:       []string{},
-				currentFilter: "",
+				fieldCache:       fieldCache,
+				fieldState:       fieldState,
+				filters:          []string{},
+				currentFilter:    "",
 				currentResults:   []*DocEntry{},
 				filteredResults:  []*DocEntry{},
 				displayedResults: []*DocEntry{},

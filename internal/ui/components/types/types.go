@@ -3,7 +3,7 @@ package types
 import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
+	"github.com/tpe11etier/cloudcutter/internal/ui/help"
 )
 
 const (

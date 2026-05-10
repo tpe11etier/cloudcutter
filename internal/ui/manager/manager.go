@@ -5,28 +5,28 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/profile"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/region"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/statusbar"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/help"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/header"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/profile"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/region"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/statusbar"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/help"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 )
 
 const (
-	ViewDynamoDB   = "dynamodb"
-	ViewElastic    = "elastic"
-	ModalCmdPrompt = "modalPrompt"
-	ModalJSON      = "modalJSON"
+	ViewDynamoDB = "dynamodb"
+	ViewElastic  = "elastic"
+	ModalJSON    = "modalJSON"
 )
 
 type Manager struct {
@@ -38,7 +38,6 @@ type Manager struct {
 	activeView        views.View
 	pages             *tview.Pages
 	layout            *tview.Flex
-	awsConfig         aws.Config
 	primitivesByID    map[string]tview.Primitive
 	logger            *logger.Logger
 	spinner           *spinner.Spinner
@@ -53,10 +52,26 @@ type Manager struct {
 	StatusChan         chan string
 	focusedComponentID string
 	profileHandler     *profile.Handler
+	resolver           *environments.Resolver
 }
 
-func (vm *Manager) GetCurrentConfig() aws.Config {
-	return vm.awsConfig
+// CurrentSession returns the active auth session (nil before first profile
+// switch). Lets views read profile-specific state — e.g. the Dragos JWT/base
+// URL that doesn't fit into aws.Config.
+func (vm *Manager) CurrentSession() *auth.Session {
+	if vm.profileHandler == nil {
+		return nil
+	}
+	return vm.profileHandler.CurrentSession()
+}
+
+// focusActiveView focuses the active view's content if there is one. No-op
+// before the first profile is selected (when activeView is nil).
+func (vm *Manager) focusActiveView() {
+	if vm.activeView == nil {
+		return
+	}
+	vm.app.SetFocus(vm.activeView.Content())
 }
 
 func (vm *Manager) Pages() *tview.Pages {
@@ -71,7 +86,13 @@ func (vm *Manager) ActiveView() tview.Primitive {
 	return vm.activeView.Content()
 }
 
-func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log *logger.Logger) *Manager {
+// Resolver returns the environments.Resolver. May be nil if the binary was
+// constructed without one (only happens in tests today).
+func (vm *Manager) Resolver() *environments.Resolver {
+	return vm.resolver
+}
+
+func NewViewManager(ctx context.Context, app *ui.App, log *logger.Logger, resolver *environments.Resolver) *Manager {
 	ctx, cancel := context.WithCancel(ctx)
 	vm := &Manager{
 		ctx:            ctx,
@@ -83,11 +104,11 @@ func NewViewManager(ctx context.Context, app *ui.App, awsConfig aws.Config, log 
 		statusBar:      statusbar.NewStatusBar(),
 		prompt:         components.NewPrompt(),
 		filterPrompt:   components.NewPrompt(),
-		awsConfig:      awsConfig,
 		primitivesByID: make(map[string]tview.Primitive),
 		StatusChan:     make(chan string, 10),
 		help:           help.NewHelp(),
 		logger:         log,
+		resolver:       resolver,
 	}
 
 	var err error
@@ -155,9 +176,8 @@ func (vm *Manager) setupPrompts() {
 	})
 
 	vm.prompt.SetCancelFunc(func() {
-		vm.HideModal(ModalCmdPrompt)
-		vm.prompt.InputField.SetText("")
 		vm.HideModal(types.ModalCmdPrompt)
+		vm.prompt.InputField.SetText("")
 	})
 }
 
@@ -169,7 +189,7 @@ func (vm *Manager) showModal(name string, content tview.Primitive, width int, he
 func (vm *Manager) HideModal(name string) {
 	vm.pages.RemovePage(name)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -476,7 +496,7 @@ func (vm *Manager) ViewContext() context.Context {
 
 func (vm *Manager) hidePrompt() {
 	vm.pages.RemovePage(types.ModalCmdPrompt)
-	vm.app.SetFocus(vm.activeView.Content())
+	vm.focusActiveView()
 }
 
 func (vm *Manager) SetFocus(p tview.Primitive) {
@@ -513,7 +533,9 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyEsc {
 		if vm.pages.HasPage(types.ModalCmdPrompt) {
 			vm.pages.RemovePage(types.ModalCmdPrompt)
-			vm.app.SetFocus(vm.activeView.Content())
+			if vm.activeView != nil {
+				vm.focusActiveView()
+			}
 			return nil
 		}
 		if vm.pages.HasPage(types.ModalFilter) {
@@ -574,78 +596,11 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	return event
 }
 
-func (vm *Manager) switchToDevProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return fmt.Errorf(status)
-	}
-
-	vm.profileHandler.SwitchProfile(vm.ctx, "opal_dev", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to dev profile: %v", err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "opal_dev")
-
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic after dev profile", "error", err)
-		}
-
-		vm.StatusChan <- "Successfully switched to dev profile"
-	})
-
-	return nil
-}
-
-func (vm *Manager) switchToLocalProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return fmt.Errorf(status)
-	}
-
-	vm.logger.Info("Starting local profile switch")
-	vm.profileHandler.SwitchProfile(vm.ctx, "local", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.logger.Error("Failed to switch to local profile", "error", err)
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to local profile: %v", err)
-			return
-		}
-
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "local")
-
-		// Instead of calling vm.reinitializeViews() here:
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.logger.Error("Error reinitializing active view", "error", err)
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing active view: %v", err)
-			return
-		}
-
-		// Switch to a default or main view if you wish
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.logger.Error("Failed to switch to Elastic after local profile", "error", err)
-		}
-
-		vm.StatusChan <- "Successfully switched to local profile"
-	})
-
-	return nil
-}
-
 func (vm *Manager) reinitializeViews() error {
 	if vm.activeView != nil {
 		activeName := vm.activeView.Name()
 		if reinitView, ok := vm.activeView.(views.Reinitializer); ok {
-			if err := reinitView.Reinitialize(vm.awsConfig); err != nil {
+			if err := reinitView.Reinitialize(); err != nil {
 				return fmt.Errorf("failed to reinitialize %s view: %w", activeName, err)
 			}
 		}
@@ -656,26 +611,18 @@ func (vm *Manager) reinitializeViews() error {
 func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 	profileSelector := profile.NewSelector(
 		vm.profileHandler,
-		func(profile string) {
+		func(name string) {
 			if vm.activeView != nil {
-				vm.app.SetFocus(vm.activeView.Content())
+				vm.focusActiveView()
 			}
-
-			vm.statusBar.SetText(fmt.Sprintf("Switching to %s profile...", profile))
-			switch profile {
-			case "opal_dev":
-				vm.switchToDevProfile()
-			case "opal_prod":
-				vm.switchToProdProfile()
-			case "local":
-				vm.switchToLocalProfile()
-			default:
-				vm.switchToStandardProfile(profile)
-			}
+			vm.statusBar.SetText(fmt.Sprintf("Switching to %s...", name))
+			vm.switchToEnvironment(name)
 		},
 		func() {
 			vm.pages.RemovePage("profileSelector")
-			vm.app.SetFocus(vm.activeView.Content())
+			if vm.activeView != nil {
+				vm.focusActiveView()
+			}
 		},
 		vm.statusBar,
 		vm,
@@ -687,14 +634,14 @@ func (vm *Manager) ShowProfileSelector() (tview.Primitive, error) {
 func (vm *Manager) hideProfileSelector() {
 	vm.pages.RemovePage("profileSelector")
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
 func (vm *Manager) hideHelp() {
 	vm.pages.RemovePage(help.ModalHelp)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -728,20 +675,18 @@ func (vm *Manager) startStatusListener() {
 	}()
 }
 
-func (vm *Manager) UpdateRegion(region string) error {
-	cfg := vm.awsConfig.Copy()
-	cfg.Region = region
-	vm.awsConfig = cfg
-
-	// Re-init only the active view, if it’s a Reinitializer
-	if err := vm.reinitializeActiveView(); err != nil {
-		vm.StatusChan <- fmt.Sprintf("Error reinitializing active view in new region: %v", err)
-		return err
-	}
-
+// UpdateRegion re-materializes the active environment against the new region.
+// For non-AWS environments the re-switch is a cheap no-op aside from the
+// header label change.
+func (vm *Manager) UpdateRegion(region string) {
+	vm.profileHandler.SetRegion(region)
 	vm.header.UpdateEnvVar("Region", region)
-	vm.StatusChan <- fmt.Sprintf("Switched region to %s (active view reinitialized)", region)
-	return nil
+
+	sess := vm.profileHandler.CurrentSession()
+	if sess != nil {
+		vm.switchToEnvironment(sess.Profile)
+		vm.StatusChan <- fmt.Sprintf("Switched region to %s", region)
+	}
 }
 
 func (vm *Manager) showCmdPrompt() {
@@ -758,14 +703,10 @@ func (vm *Manager) showCmdPrompt() {
 	vm.showModal(types.ModalCmdPrompt, vm.prompt, 50, 3)
 }
 
-func (vm *Manager) CurrentProfile() string {
-	return vm.profileHandler.GetCurrentProfile()
-}
-
 func (vm *Manager) HideFilterPrompt() {
 	vm.pages.RemovePage(types.ModalFilter)
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -794,23 +735,14 @@ func applyStyleToBox(box tview.Primitive, style types.BaseStyle) {
 func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 	regionSelector := region.NewRegionSelector(
 		func(region string) {
-			// Hide first
 			vm.pages.RemovePage("regionSelector")
-			vm.app.SetFocus(vm.activeView.Content())
-
-			// Then do the update
-			vm.statusBar.SetText(fmt.Sprintf("Switching to region %s...", region))
-			if err := vm.UpdateRegion(region); err != nil {
-				vm.StatusChan <- fmt.Sprintf("Error switching region: %v", err)
-			} else {
-				vm.StatusChan <- fmt.Sprintf("Successfully switched to region: %s", region)
-			}
+			vm.focusActiveView()
+			vm.UpdateRegion(region)
 		},
 		func() {
 			vm.pages.RemovePage("regionSelector")
-			vm.app.SetFocus(vm.activeView.Content())
+			vm.focusActiveView()
 		},
-		vm.statusBar,
 		vm,
 	)
 
@@ -820,7 +752,7 @@ func (vm *Manager) showRegionSelector() (tview.Primitive, error) {
 func (vm *Manager) hideRegionSelector() {
 	vm.pages.RemovePage("regionSelector")
 	if vm.activeView != nil {
-		vm.app.SetFocus(vm.activeView.Content())
+		vm.focusActiveView()
 	}
 }
 
@@ -886,60 +818,6 @@ func (vm *Manager) hideLoading() {
 	}
 }
 
-func (vm *Manager) switchToProdProfile() error {
-	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
-		return fmt.Errorf(status)
-	}
-
-	vm.hideProfileSelector()
-
-	vm.profileHandler.SwitchProfile(vm.ctx, "opal_prod", func(cfg aws.Config, err error) {
-		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to prod profile: %v", err)
-			return
-		}
-
-		vm.showLoading("Authenticating with prod profile...")
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", "opal_prod")
-
-		if vm.spinner == nil {
-			vm.spinner = spinner.NewSpinner("Loading Available Fields...")
-			vm.spinner.SetOnComplete(func() {
-				vm.pages.RemovePage("loading")
-				if vm.loadingCancelFunc != nil {
-					vm.loadingCancelFunc()
-					vm.loadingCancelFunc = nil
-				}
-			})
-		} else {
-			vm.spinner.SetMessage("Loading Available Fields...")
-		}
-
-		if !vm.spinner.IsLoading() {
-			var ctx context.Context
-			ctx, vm.loadingCancelFunc = context.WithCancel(vm.ctx)
-
-			modal := spinner.CreateSpinnerModal(vm.spinner)
-			vm.pages.AddPage("loading", modal, true, true)
-			vm.app.SetFocus(modal)
-
-			vm.spinner.StartWithContext(ctx, vm.App())
-		}
-
-		if err := vm.reinitializeActiveView(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
-			return
-		}
-
-		vm.StatusChan <- "Successfully switched to prod profile"
-	})
-
-	return nil
-}
-
 func (vm *Manager) UpdateViewCommands(commands []header.ViewCommands) {
 	vm.header.SetViewCommands(commands)
 }
@@ -948,33 +826,216 @@ func (vm *Manager) GetStatusBar() *statusbar.StatusBar {
 	return vm.statusBar
 }
 
-func (vm *Manager) switchToStandardProfile(profile string) {
+// switchToEnvironment is the unified profile-switch entry point introduced
+// in phase 4. Resolves the named environment via the YAML resolver,
+// materializes it with the current region, and dispatches via
+// profileHandler.SwitchEnvironment. The callback updates the header,
+// reinitializes the active view, and (for jwt environments) pops the
+// login modal on auth failure.
+func (vm *Manager) switchToEnvironment(name string) {
+	if vm.resolver == nil {
+		vm.StatusChan <- "Configuration error: no environment resolver"
+		return
+	}
 	if vm.profileHandler.IsAuthenticating() {
-		status := "Authentication already in progress"
-		vm.StatusChan <- status
+		vm.StatusChan <- "Authentication already in progress"
 		return
 	}
 
-	vm.profileHandler.SwitchProfile(vm.ctx, profile, func(cfg aws.Config, err error) {
+	spec, err := vm.resolver.Resolve(name)
+	if err != nil {
+		vm.StatusChan <- fmt.Sprintf("Resolve %q: %v", name, err)
+		return
+	}
+
+	region := vm.profileHandler.GetRegion()
+	env, err := environments.Materialize(spec, region)
+	if err != nil {
+		vm.StatusChan <- fmt.Sprintf("Materialize %q: %v", name, err)
+		return
+	}
+
+	// Dragos-style jwt environments need the login modal popped on auth
+	// failure if the user has no token cached. Detect this before invoking
+	// SwitchEnvironment so the modal appears with no detour through a
+	// status-bar error.
+	needsLoginModal := env.Auth.Type == "jwt" && env.Auth.Login != nil
+
+	vm.profileHandler.SwitchEnvironment(vm.ctx, env, func(sess *auth.Session, err error) {
 		if err != nil {
-			vm.StatusChan <- fmt.Sprintf("Failed to switch to profile %s: %v", profile, err)
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Auth failed: %v", err))
+				if needsLoginModal {
+					vm.ShowJWTLoginModal(env,
+						func() { vm.switchToEnvironment(name) },
+						func() { vm.StatusChan <- "Auth canceled" },
+					)
+				}
+			})
 			return
 		}
 
-		vm.awsConfig = cfg
-		vm.header.UpdateEnvVar("Profile", profile)
+		vm.app.QueueUpdateDraw(func() {
+			vm.header.UpdateEnvVar("Profile", sess.Environment.Name)
+			if sess.Environment.Auth.Type == "aws_sdk" {
+				vm.header.UpdateEnvVar("Region", sess.Environment.Region)
+			} else {
+				vm.header.UpdateEnvVar("Region", "—")
+			}
+		})
 
-		if err := vm.reinitializeViews(); err != nil {
-			vm.StatusChan <- fmt.Sprintf("Error reinitializing views: %v", err)
+		if err := vm.reinitializeActiveView(); err != nil {
+			vm.app.QueueUpdateDraw(func() {
+				vm.statusBar.SetText(fmt.Sprintf("Reinit failed: %v", err))
+				if needsLoginModal {
+					vm.ShowJWTLoginModal(env,
+						func() { vm.switchToEnvironment(name) },
+						func() { vm.StatusChan <- "Auth canceled" },
+					)
+				}
+			})
 			return
 		}
 
 		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic after standard profile", "error", err)
+			vm.Logger().Error("Failed to switch to Elastic", "error", err)
 		}
 
-		vm.StatusChan <- fmt.Sprintf("Successfully switched to profile %s", profile)
+		vm.StatusChan <- fmt.Sprintf("Switched to %s", sess.Environment.Name)
 	})
+}
+
+// ShowJWTLoginModal opens a form derived from env.Auth.Login.BodyFields,
+// POSTs the submitted values via auth.LoginJWT, persists the resulting
+// token to env.Auth.Path, and calls onSuccess. Esc / Cancel calls
+// onCancel. Every backend-specific knob (URL, query params, body fields,
+// token extraction) comes from env.Auth.Login.
+func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess func(), onCancel func()) {
+	const pageName = "jwtLogin"
+
+	if env.Auth.Login == nil {
+		vm.statusBar.SetText(fmt.Sprintf("Environment %q has no login spec", env.Name))
+		if onCancel != nil {
+			onCancel()
+		}
+		return
+	}
+	loginSpec := *env.Auth.Login
+
+	form := tview.NewForm()
+	form.SetBorder(true)
+	form.SetTitle(fmt.Sprintf(" %s Login — %s (Tab to move, Enter to submit, Esc to cancel) ", env.Name, loginSpec.URL))
+	form.SetTitleAlign(tview.AlignLeft)
+	form.SetTitleColor(style.GruvboxMaterial.Yellow)
+	form.SetBorderColor(tcell.ColorMediumTurquoise)
+	form.SetFieldBackgroundColor(tcell.ColorBlack)
+	form.SetFieldTextColor(tcell.ColorBeige)
+	form.SetButtonBackgroundColor(tcell.ColorDarkCyan)
+	form.SetButtonTextColor(tcell.ColorBeige)
+
+	for _, f := range loginSpec.BodyFields {
+		label := titleCase(f.Name)
+		if f.Kind == "password" {
+			form.AddPasswordField(label, "", 40, '*', nil)
+		} else {
+			form.AddInputField(label, "", 40, nil, nil)
+		}
+	}
+
+	closeModal := func() { vm.pages.RemovePage(pageName) }
+
+	submit := func() {
+		values := make(map[string]string, len(loginSpec.BodyFields))
+		missing := []string{}
+		for _, f := range loginSpec.BodyFields {
+			label := titleCase(f.Name)
+			input, ok := form.GetFormItemByLabel(label).(*tview.InputField)
+			if !ok {
+				continue
+			}
+			val := input.GetText()
+			if f.Kind != "password" {
+				val = strings.TrimSpace(val)
+			}
+			if val == "" {
+				missing = append(missing, label)
+			}
+			values[f.Name] = val
+		}
+		if len(missing) > 0 {
+			vm.statusBar.SetText(fmt.Sprintf("Required: %s", strings.Join(missing, ", ")))
+			return
+		}
+
+		vm.statusBar.SetText(fmt.Sprintf("Authenticating with %s...", env.Name))
+		go func() {
+			token, err := auth.LoginJWT(vm.ctx, loginSpec, values)
+			vm.app.QueueUpdateDraw(func() {
+				if err != nil {
+					vm.statusBar.SetText(fmt.Sprintf("Login failed: %v", err))
+					return
+				}
+				if err := auth.WriteTokenFile(env.Auth.Path, token); err != nil {
+					vm.statusBar.SetText(fmt.Sprintf("Login OK but couldn't save token: %v", err))
+					return
+				}
+				closeModal()
+				vm.statusBar.SetText(fmt.Sprintf("%s login successful", env.Name))
+				if onSuccess != nil {
+					onSuccess()
+				}
+			})
+		}()
+	}
+
+	form.AddButton("Login", submit)
+	form.AddButton("Cancel", func() {
+		closeModal()
+		if onCancel != nil {
+			onCancel()
+		}
+	})
+	form.SetCancelFunc(func() {
+		closeModal()
+		if onCancel != nil {
+			onCancel()
+		}
+	})
+
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() != tcell.KeyEnter {
+			return event
+		}
+		_, btnIdx := form.GetFocusedItemIndex()
+		if btnIdx >= 0 {
+			return event
+		}
+		submit()
+		return nil
+	})
+
+	height := 5 + 2*len(loginSpec.BodyFields)
+	width := 60
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().
+			AddItem(nil, 0, 1, false).
+			AddItem(form, width, 0, true).
+			AddItem(nil, 0, 1, false),
+			height, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	vm.pages.AddPage(pageName, layout, true, true)
+	vm.app.SetFocus(form)
+}
+
+// titleCase capitalizes the first letter of s. Used to render lowercase
+// body_fields names ("username") as proper form labels ("Username").
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func (vm *Manager) reinitializeActiveView() error {
@@ -982,7 +1043,7 @@ func (vm *Manager) reinitializeActiveView() error {
 		return nil
 	}
 	if reinit, ok := vm.activeView.(views.Reinitializer); ok {
-		return reinit.Reinitialize(vm.awsConfig)
+		return reinit.Reinitialize()
 	}
 	return nil
 }

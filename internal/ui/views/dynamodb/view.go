@@ -13,14 +13,14 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/services/aws/dynamodb"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/types"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"github.com/tpe11etier/cloudcutter/internal/services/aws/dynamodb"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 )
 
 var _ views.Reinitializer = (*View)(nil)
@@ -578,8 +578,12 @@ func (v *View) showTableItems(tableName string) {
 		})
 	}()
 }
-func (v *View) Reinitialize(cfg aws.Config) error {
-	v.service = dynamodb.NewService(cfg)
+func (v *View) Reinitialize() error {
+	session := v.manager.CurrentSession()
+	if session == nil {
+		return fmt.Errorf("no active session")
+	}
+	v.service = dynamodb.NewService(session.Config)
 
 	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.state.originalItems = nil

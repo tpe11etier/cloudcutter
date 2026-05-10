@@ -4,9 +4,9 @@ package manager
 //import (
 //	"context"
 //	"fmt"
-//	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-//	components2 "github.com/tpelletiersophos/cloudcutter/internal/ui/components"
-//	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/header"
+//	"github.com/tpe11etier/cloudcutter/internal/ui"
+//	components2 "github.com/tpe11etier/cloudcutter/internal/ui/components"
+//	"github.com/tpe11etier/cloudcutter/internal/ui/components/header"
 //	"testing"
 //	"time"
 //

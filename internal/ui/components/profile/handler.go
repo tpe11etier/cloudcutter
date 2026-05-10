@@ -1,12 +1,10 @@
 package profile
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/tpelletiersophos/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
 )
 
 type Handler struct {
@@ -42,35 +40,11 @@ func (ph *Handler) sendStatus(status string) {
 	}
 }
 
-func (ph *Handler) SwitchProfile(ctx context.Context, profile string, callback func(aws.Config, error)) {
-	if ph.onLoadStart != nil {
-		ph.onLoadStart(fmt.Sprintf("Authenticating profile: %s", profile))
-	}
-
-	go func() {
-		defer func() {
-			if ph.onLoadEnd != nil {
-				ph.onLoadEnd()
-			}
-		}()
-
-		session, err := ph.auth.SwitchProfile(ctx, profile, ph.region)
-		if err != nil {
-			ph.sendStatus(fmt.Sprintf("Authentication failed: %v", err))
-			callback(aws.Config{}, err)
-			return
-		}
-
-		ph.sendStatus(fmt.Sprintf("Successfully authenticated with profile: %s", profile))
-		callback(session.Config, nil)
-	}()
-}
-
-func (ph *Handler) GetCurrentProfile() string {
-	if session := ph.auth.Current(); session != nil {
-		return session.Profile
-	}
-	return ""
+// CurrentSession returns the active auth session (or nil if not yet
+// authenticated). Used by views that need the resolved Environment, JWT,
+// or AWS credentials.
+func (ph *Handler) CurrentSession() *auth.Session {
+	return ph.auth.Current()
 }
 
 func (ph *Handler) IsAuthenticating() bool {

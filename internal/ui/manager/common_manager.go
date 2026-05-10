@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/common"
-	commonErrors "github.com/tpelletiersophos/cloudcutter/internal/ui/common/errors"
-	commonEvents "github.com/tpelletiersophos/cloudcutter/internal/ui/common/events"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
+	"github.com/tpe11etier/cloudcutter/internal/ui/common"
+	commonErrors "github.com/tpe11etier/cloudcutter/internal/ui/common/errors"
+	commonEvents "github.com/tpe11etier/cloudcutter/internal/ui/common/events"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
 )
 
 // CommonSystemsManager extends the Manager to coordinate common systems across all views

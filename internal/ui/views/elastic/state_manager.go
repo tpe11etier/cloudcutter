@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/services/elastic"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
 )
 
 // StateManager provides centralized, thread-safe state management with hooks and validation

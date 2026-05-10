@@ -14,7 +14,7 @@ jobs:
   dependency-security-check:
     name: Dependency security check
     runs-on: ubuntu-latest
-    container: golang:1.23.4-alpine3.21
+    container: golang:1.24-alpine
 
     steps:
       - name: Checkout repo
@@ -32,7 +32,7 @@ jobs:
   unit-race-condition-tests:
     name: Unit test with race detection
     runs-on: ubuntu-latest
-    container: golang:1.23.4-alpine3.21
+    container: golang:1.24-alpine
 
     steps:
       - name: Checkout repo

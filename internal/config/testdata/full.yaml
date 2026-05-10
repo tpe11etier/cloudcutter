@@ -1,0 +1,64 @@
+default_aws_backend:
+  vars:
+    role_id:
+      - { match: "^opal_dev$",  env: OPAL_DEV_ROLE_ID }
+      - { match: "^opal_prod$", env: OPAL_PROD_ROLE_ID }
+    prefix:
+      - { match: "^opal_dev$",  value: dev }
+      - { match: "^opal_prod$", value: prod }
+  auth:
+    type: aws_sdk
+    pre_auth:
+      command: ["opal", "iam-roles:start", "--id", "{role_id}", "--profileName", "{profile}"]
+      detect_session_expired:
+        - "Enter your email"
+        - "session is invalid or expired"
+  transport:
+    type: sigv4
+    service: es
+    url_template: "https://{prefix}-{region}-primary-es.darkbytes.io"
+  index_pattern: "main-summary-*"
+  time_fields:
+    - { name: unixTime, format: unix }
+    - { name: detectionGeneratedTime, format: unix_ms }
+
+environments:
+  - name: dragos
+    auth:
+      type: jwt
+      path: ~/.cloudcutter/dragos.token
+      env: DRAGOS_AUTH_TOKEN
+      login:
+        url: https://platform.dragos.cloud/auth/api/v1/login/password
+        body_format: json
+        body_fields:
+          - { name: username, kind: text }
+          - { name: password, kind: password }
+        query:
+          providerId: "00000000-0000-0000-0000-000000000002"
+        token_extract:
+          from: cookie
+          name: dragos-auth-token
+    transport:
+      type: kibana_proxy
+      base_url: https://platform.dragos.cloud
+      proxy_path: /kibana/api/console/proxy
+      token_header:
+        name: Cookie
+        format: "dragos-auth-token={token}"
+      headers:
+        kbn-xsrf: cloudcutter
+        kbn-version: "8.19.2"
+      probe:
+        path: _cluster/health
+        reject_html: true
+    index_pattern: "events*"
+    time_fields:
+      - { name: createdAt, format: date }
+
+  - name: local
+    auth: { type: none }
+    transport:
+      type: plain
+      base_url: http://localhost:9200
+    time_fields: []

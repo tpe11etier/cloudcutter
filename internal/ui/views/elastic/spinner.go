@@ -1,6 +1,6 @@
 package elastic
 
-import "github.com/tpelletiersophos/cloudcutter/internal/ui/components/spinner"
+import "github.com/tpe11etier/cloudcutter/internal/ui/components/spinner"
 
 func (v *View) showLoading(message string) {
 	v.state.mu.Lock()

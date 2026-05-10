@@ -7,18 +7,18 @@ import (
 	"os"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/views"
-
-	awssdk "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/tpelletiersophos/cloudcutter/internal/services"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	ddbv "github.com/tpelletiersophos/cloudcutter/internal/ui/views/dynamodb"
-	elasticView "github.com/tpelletiersophos/cloudcutter/internal/ui/views/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/config"
+	"github.com/tpe11etier/cloudcutter/internal/environments"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/services"
+	"github.com/tpe11etier/cloudcutter/internal/services/elastic"
+	"github.com/tpe11etier/cloudcutter/internal/ui"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/ui/views"
+	ddbv "github.com/tpe11etier/cloudcutter/internal/ui/views/dynamodb"
+	elasticView "github.com/tpe11etier/cloudcutter/internal/ui/views/elastic"
 )
 
 var (
@@ -41,6 +41,18 @@ func init() {
 }
 
 func runApplication() {
+	if path := config.DefaultConfigPath(); path != "" {
+		wrote, err := config.EnsureExists(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cloudcutter: %v\n", err)
+			os.Exit(1)
+		}
+		if wrote {
+			fmt.Fprintf(os.Stderr, "wrote starter config to %s — edit it and run cloudcutter again\n", path)
+			os.Exit(0)
+		}
+	}
+
 	ctx := context.Background()
 	app := ui.NewApp()
 
@@ -60,31 +72,56 @@ func runApplication() {
 	}
 	defer logInstance.Close()
 
-	defaultConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+	configPath := config.DefaultConfigPath()
+	rawCfg, err := config.Load(configPath)
 	if err != nil {
-		logInstance.Error("Failed to load default config", "error", err)
-		defaultConfig = awssdk.Config{}
+		logInstance.Error("Failed to load config", "path", configPath, "error", err)
+		fmt.Fprintf(os.Stderr, "cloudcutter: failed to load %s: %v\n", configPath, err)
+		os.Exit(1)
 	}
+	if err := config.Validate(rawCfg); err != nil {
+		logInstance.Error("Config validation failed", "error", err)
+		fmt.Fprintf(os.Stderr, "cloudcutter: config validation: %v\n", err)
+		os.Exit(1)
+	}
+	homeDir, _ := os.UserHomeDir()
+	awsProfiles, _ := environments.DiscoverAWSProfiles(homeDir)
+	resolver := environments.NewResolver(rawCfg, awsProfiles)
 
-	viewManager := manager.NewViewManager(ctx, app, defaultConfig, logInstance)
+	viewManager := manager.NewViewManager(ctx, app, logInstance, resolver)
 
 	viewManager.ShowProfileSelector()
 
 	// Register lazy views
-	services, _ := services.New(defaultConfig, "us-west-2")
+	services := services.New("us-west-2")
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
-		currentConfig := viewManager.GetCurrentConfig()
-		if err := services.InitializeDynamoDB(currentConfig); err != nil {
+		session := viewManager.CurrentSession()
+		if session == nil {
+			return nil, fmt.Errorf("no active session for dynamodb view")
+		}
+		if err := services.InitializeDynamoDB(session.Config); err != nil {
 			return nil, err
 		}
 		return ddbv.NewView(viewManager, services.DynamoDB), nil
 	})
 	viewManager.RegisterLazyView(manager.ViewElastic, func() (views.View, error) {
-		currentConfig := viewManager.GetCurrentConfig()
-		if err := services.InitializeElastic(currentConfig); err != nil {
-			return nil, err
+		session := viewManager.CurrentSession()
+		if session == nil {
+			return nil, fmt.Errorf("no active session for elastic view")
 		}
-		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, "main-summary-*")
+
+		svc, err := elastic.NewServiceFromEnv(session.Environment, session.Config, session.Token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create elastic service: %w", err)
+		}
+		services.Elastic = svc
+
+		defaultIndex := session.Environment.IndexPattern
+		if defaultIndex == "" {
+			defaultIndex = "main-summary-*"
+		}
+
+		elasticViewInstance, err := elasticView.NewView(viewManager, services.Elastic, defaultIndex)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create elastic view: %w", err)
 		}

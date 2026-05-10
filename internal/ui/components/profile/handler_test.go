@@ -1,14 +1,12 @@
 package profile
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
-	"github.com/tpelletiersophos/cloudcutter/internal/auth"
+	"github.com/tpe11etier/cloudcutter/internal/auth"
 )
 
 func TestNewProfileHandler(t *testing.T) {
@@ -35,98 +33,7 @@ func TestNewProfileHandler(t *testing.T) {
 	assert.True(t, loadEndCalled)
 }
 
-func TestSwitchProfile_Success(t *testing.T) {
-	statusChan := make(chan string, 10)
-	var mu sync.Mutex
-	var loadStartCalled bool
-	var loadEndCalled bool
-	var loadStartMsg string
-
-	authenticator, err := auth.New(func(status string) {})
-	assert.Nil(t, err)
-
-	ph := &Handler{
-		auth:       authenticator,
-		statusChan: statusChan,
-		region:     "us-west-2",
-		onLoadStart: func(msg string) {
-			mu.Lock()
-			loadStartCalled = true
-			loadStartMsg = msg
-			mu.Unlock()
-		},
-		onLoadEnd: func() {
-			mu.Lock()
-			loadEndCalled = true
-			mu.Unlock()
-		},
-	}
-
-	var resultCfg aws.Config
-	var resultErr error
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	ph.SwitchProfile(context.Background(), "local", func(cfg aws.Config, err error) {
-		mu.Lock()
-		resultCfg = cfg
-		resultErr = err
-		mu.Unlock()
-		wg.Done()
-	})
-
-	wg.Wait()
-
-	mu.Lock()
-	assert.True(t, loadStartCalled, "loadStart should have been called")
-	assert.Equal(t, "Authenticating profile: local", loadStartMsg)
-	assert.True(t, loadEndCalled, "loadEnd should have been called")
-	assert.NotEmpty(t, resultCfg.Region)
-	assert.Nil(t, resultErr)
-	mu.Unlock()
-}
-
-func TestSwitchProfile_Error(t *testing.T) {
-	statusChan := make(chan string, 10)
-	var mu sync.Mutex
-	var loadEndCalled bool
-
-	authenticator, err := auth.New(func(status string) {})
-	assert.Nil(t, err)
-
-	ph := &Handler{
-		auth:        authenticator,
-		statusChan:  statusChan,
-		region:      "us-west-2",
-		onLoadStart: func(msg string) {},
-		onLoadEnd: func() {
-			mu.Lock()
-			loadEndCalled = true
-			mu.Unlock()
-		},
-	}
-
-	var resultErr error
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	// Use an invalid profile to trigger an error
-	ph.SwitchProfile(context.Background(), "invalid_profile", func(cfg aws.Config, err error) {
-		mu.Lock()
-		resultErr = err
-		mu.Unlock()
-		wg.Done()
-	})
-
-	wg.Wait()
-
-	mu.Lock()
-	assert.True(t, loadEndCalled, "loadEnd should have been called")
-	assert.NotNil(t, resultErr, "should have received an error")
-	mu.Unlock()
-}
-
-func TestGetCurrentProfile(t *testing.T) {
+func TestCurrentSessionEmptyBeforeAuth(t *testing.T) {
 	authenticator, err := auth.New(func(status string) {})
 	assert.Nil(t, err)
 	ph := &Handler{
@@ -134,7 +41,7 @@ func TestGetCurrentProfile(t *testing.T) {
 		region: "us-west-2",
 	}
 
-	assert.Empty(t, ph.GetCurrentProfile())
+	assert.Nil(t, ph.CurrentSession())
 }
 
 func TestRegionOperations(t *testing.T) {

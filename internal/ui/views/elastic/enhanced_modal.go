@@ -9,8 +9,8 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/manager"
-	"github.com/tpelletiersophos/cloudcutter/internal/ui/style"
+	"github.com/tpe11etier/cloudcutter/internal/ui/manager"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 // EnhancedJSONModal provides vim-like navigation and dynamic resizing for JSON documents
@@ -957,7 +957,6 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 
 	return result.String()
 }
-
 
 // scrollToShowCursor ensures the cursor position is visible in the textView
 func (m *EnhancedJSONModal) scrollToShowCursor() {

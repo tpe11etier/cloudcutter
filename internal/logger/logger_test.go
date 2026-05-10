@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tpelletiersophos/cloudcutter/internal/logger"
+	"github.com/tpe11etier/cloudcutter/internal/logger"
 )
 
 func TestLogger(t *testing.T) {
