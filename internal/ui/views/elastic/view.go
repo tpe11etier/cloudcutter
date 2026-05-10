@@ -198,25 +198,20 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 
 func (v *View) Reinitialize(cfg aws.Config) error {
 	session := v.manager.CurrentSession()
-	if session != nil && session.Dragos != nil {
-		if err := v.service.ReinitializeDragos(session.Dragos); err != nil {
-			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing Dragos ES service: %v", err))
-			return err
-		}
-	} else {
-		if err := v.service.Reinitialize(cfg, v.manager.CurrentProfile()); err != nil {
-			v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
-			return err
-		}
+	if session == nil {
+		return fmt.Errorf("no active session")
+	}
+
+	if err := v.service.ReinitializeFromEnv(session.Environment, session.Config, session.Token); err != nil {
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error reinitializing ES service: %v", err))
+		return err
 	}
 
 	v.state.mu.Lock()
-	if session != nil && session.Dragos != nil {
-		if pattern := session.Dragos.IndexPattern; pattern != "" {
-			v.state.search.currentIndex = pattern
-		}
+	if pattern := session.Environment.IndexPattern; pattern != "" {
+		v.state.search.currentIndex = pattern
 	}
-	if cfg.Region == "local" {
+	if session.Environment.Auth.Type == "none" {
 		v.state.search.timeframe = ""
 	}
 	v.state.data.fieldCache = NewFieldCache()
@@ -224,21 +219,14 @@ func (v *View) Reinitialize(cfg aws.Config) error {
 	v.state.mu.Unlock()
 
 	v.manager.App().QueueUpdateDraw(func() {
-		if cfg.Region == "local" {
+		if session.Environment.Auth.Type == "none" {
 			v.components.timeframeInput.SetText("")
 		}
-		if session != nil && session.Dragos != nil && session.Dragos.IndexPattern != "" && v.components.indexInput != nil {
-			v.components.indexInput.SetText(session.Dragos.IndexPattern)
+		if pattern := session.Environment.IndexPattern; pattern != "" && v.components.indexInput != nil {
+			v.components.indexInput.SetText(pattern)
 		}
 	})
 
-	v.manager.App().QueueUpdateDraw(func() {
-		v.components.fieldList.Clear()
-		v.components.selectedList.Clear()
-		v.manager.SetFocus(v.components.filterInput)
-	})
-
-	// Load fields and rebuild UI
 	if err := v.loadFields(); err != nil {
 		v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
 		return err
