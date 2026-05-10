@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-09
 **Branch**: `dragos-platform`
-**Status**: Phase 4 implemented (tag `phase-4-complete`). Phase 5 (delete legacy) plan to be drafted next.
+**Status**: All phases complete (tag `phase-5-complete`). Generic-backend refactor done.
 
 ## Problem
 
