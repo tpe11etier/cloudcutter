@@ -3,12 +3,24 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"strconv"
 )
 
+// filterInputACOpen reports whether the autocomplete dropdown is showing.
+// Tab and Enter must be passed through to tview's InputField when it is,
+// otherwise our global key routing consumes them before the dropdown can act.
+func (v *View) filterInputACOpen() bool {
+	return len(v.filterACCandidates(v.components.filterInput.GetText())) > 0
+}
+
 func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
+	if currentFocus == v.components.filterInput && v.filterInputACOpen() {
+		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	}
+
 	switch currentFocus {
 	case v.components.filterInput:
 		v.manager.App().SetFocus(v.components.activeFilters)
@@ -45,6 +57,9 @@ func (v *View) handleFilterInput(event *tcell.EventKey) *tcell.EventKey {
 		v.components.filterInput.SetText("")
 		return nil
 	case tcell.KeyEnter:
+		if v.filterInputACOpen() {
+			return event // let InputField handle autocomplete selection
+		}
 		text := v.components.filterInput.GetText()
 		if text == "" {
 			return nil

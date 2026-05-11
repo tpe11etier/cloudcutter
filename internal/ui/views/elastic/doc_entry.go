@@ -98,15 +98,10 @@ func (de *DocEntry) getFieldsRecursive(data any, prefix string, fields *[]string
 				newPrefix = prefix + "." + key
 			}
 
-			if isLeafNode(value) {
-				*fields = append(*fields, newPrefix)
-			} else {
+			*fields = append(*fields, newPrefix)
+			if !isLeafNode(value) {
 				de.getFieldsRecursive(value, newPrefix, fields)
 			}
-		}
-	case []any:
-		if prefix != "" {
-			*fields = append(*fields, prefix)
 		}
 	}
 }

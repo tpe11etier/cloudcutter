@@ -13,6 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	awsutil "github.com/tpe11etier/cloudcutter/internal/services/aws"
 	"github.com/tpe11etier/cloudcutter/internal/services/aws/dynamodb"
 	"github.com/tpe11etier/cloudcutter/internal/ui/common"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components"
@@ -266,7 +267,7 @@ func attributeValueToString(av dynamodbtypes.AttributeValue) string {
 func (v *View) initializeTableCache() {
 	tableNames, err := v.service.ListTables(v.ctx)
 	if err != nil {
-		v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching DynamoDB tables: %v", err))
+		v.manager.UpdateStatusBar(fmt.Sprintf("Error fetching DynamoDB tables: %v", awsutil.HandleAWSError(err)))
 		return
 	}
 
@@ -583,7 +584,11 @@ func (v *View) Reinitialize() error {
 	if session == nil {
 		return fmt.Errorf("no active session")
 	}
-	v.service = dynamodb.NewService(session.Config)
+	cfg := session.AWSConfigForDynamoDB()
+	if cfg.Region == "" {
+		return fmt.Errorf("DynamoDB requires an AWS profile — switch profiles first")
+	}
+	v.service = dynamodb.NewService(cfg)
 
 	v.state.tableCache = make(map[string]*dynamodbtypes.TableDescription)
 	v.state.originalItems = nil
@@ -910,3 +915,4 @@ func (v *View) filterItems(filter string) {
 		v.dataTable.SetSelectable(true, false)
 	}
 }
+

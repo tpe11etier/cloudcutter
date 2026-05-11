@@ -371,6 +371,20 @@ func (v *View) setupLayout() {
 		v.displayFilteredResults(text)
 	})
 
+	v.components.filterInput.SetAutocompleteFunc(v.filterACCandidates)
+	v.components.filterInput.SetAutocompletedFunc(func(text string, index int, source int) bool {
+		if source == tview.AutocompletedNavigate {
+			return false
+		}
+		v.components.filterInput.SetText(text + "=")
+		return true
+	})
+	v.components.filterInput.SetAutocompleteStyles(
+		tcell.ColorBlack,
+		tcell.StyleDefault.Foreground(tcell.ColorBeige),
+		tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan),
+	)
+
 }
 
 func (v *View) updateHeader() {

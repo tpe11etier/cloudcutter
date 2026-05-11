@@ -76,16 +76,10 @@ func (rs *RegionSelector) GetItemCount() int {
 
 func (rs *RegionSelector) ShowRegionSelector() (tview.Primitive, error) {
 	numEntries := rs.GetItemCount() + 2
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(rs, 30, 0, true).
-			AddItem(nil, 0, 1, false),
-			numEntries, 1, true).
-		AddItem(nil, 0, 1, false)
-
+	modal := tview.NewGrid().
+		SetRows(0, numEntries, 0).
+		SetColumns(0, 30, 0).
+		AddItem(rs, 1, 1, 1, 1, 0, 0, true)
 	rs.manager.Pages().AddPage("regionSelector", modal, true, true)
 	return rs, nil
 }

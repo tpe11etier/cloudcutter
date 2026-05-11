@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -37,6 +39,18 @@ func validateCredentials(cfg awssdk.Config) error {
 }
 
 func handleAuthError(err error) error {
+	return HandleAWSError(err)
+}
+
+// HandleAWSError maps AWS SDK errors to user-friendly messages.
+func HandleAWSError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "refresh cached SSO token") || strings.Contains(msg, "unable to refresh SSO token") {
+		return fmt.Errorf("SSO session expired — run: aws sso login --profile <profile>")
+	}
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
 		switch apiErr.ErrorCode() {

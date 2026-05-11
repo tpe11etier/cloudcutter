@@ -26,8 +26,10 @@ func Validate(cfg *Config) error {
 		if err := validateAuth(path, &env.Auth); err != nil {
 			return err
 		}
-		if err := validateTransport(path, &env.Transport); err != nil {
-			return err
+		if env.Transport.Type != "" {
+			if err := validateTransport(path, &env.Transport); err != nil {
+				return err
+			}
 		}
 		if err := validateVars(path, env.Vars); err != nil {
 			return err
@@ -43,8 +45,11 @@ func validateTemplate(path string, t *EnvironmentTemplate) error {
 	if err := validateAuth(path, &t.Auth); err != nil {
 		return err
 	}
-	if err := validateTransport(path, &t.Transport); err != nil {
-		return err
+	// Transport is optional in a template — omit it for DynamoDB-only backends.
+	if t.Transport.Type != "" {
+		if err := validateTransport(path, &t.Transport); err != nil {
+			return err
+		}
 	}
 	if err := validateVars(path, t.Vars); err != nil {
 		return err

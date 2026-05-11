@@ -20,6 +20,7 @@ type Environment struct {
 	Region       string
 	Auth         config.AuthSpec
 	Transport    config.TransportSpec
+	AWSProfile   string
 	IndexPattern string
 	TimeFields   []config.TimeField
 }
@@ -79,6 +80,7 @@ func Materialize(spec config.EnvironmentSpec, region string) (Environment, error
 		Region:       region,
 		Auth:         auth,
 		Transport:    transport,
+		AWSProfile:   spec.AWSProfile,
 		IndexPattern: spec.IndexPattern,
 		TimeFields:   spec.TimeFields,
 	}, nil

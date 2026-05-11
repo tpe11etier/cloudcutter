@@ -30,6 +30,7 @@ type EnvironmentSpec struct {
 	Vars         map[string][]VarRule `yaml:"vars,omitempty"`
 	Auth         AuthSpec             `yaml:"auth"`
 	Transport    TransportSpec        `yaml:"transport"`
+	AWSProfile   string               `yaml:"aws_profile,omitempty"`
 	IndexPattern string               `yaml:"index_pattern,omitempty"`
 	TimeFields   []TimeField          `yaml:"time_fields,omitempty"`
 }

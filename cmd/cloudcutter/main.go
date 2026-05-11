@@ -97,9 +97,13 @@ func runApplication() {
 	viewManager.RegisterLazyView(manager.ViewDynamoDB, func() (views.View, error) {
 		session := viewManager.CurrentSession()
 		if session == nil {
-			return nil, fmt.Errorf("no active session for dynamodb view")
+			return nil, fmt.Errorf("no active session")
 		}
-		if err := services.InitializeDynamoDB(session.Config); err != nil {
+		cfg := session.AWSConfigForDynamoDB()
+		if cfg.Region == "" {
+			return nil, fmt.Errorf("DynamoDB requires an AWS profile — switch profiles first")
+		}
+		if err := services.InitializeDynamoDB(cfg); err != nil {
 			return nil, err
 		}
 		return ddbv.NewView(viewManager, services.DynamoDB), nil

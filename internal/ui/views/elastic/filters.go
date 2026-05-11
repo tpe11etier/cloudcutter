@@ -96,3 +96,32 @@ func (v *View) entryMatchesFilter(entry *DocEntry, filterText string) bool {
 	}
 	return false
 }
+
+// filterInputOperatorIndex returns the index of the first operator character
+// (=, >, <, ~) in text, or -1 if none is present.
+func filterInputOperatorIndex(text string) int {
+	for i, ch := range text {
+		if ch == '=' || ch == '>' || ch == '<' || ch == '~' {
+			return i
+		}
+	}
+	return -1
+}
+
+// filterACCandidates returns discovered field names that contain text as a
+// case-insensitive substring. Returns nil when text is empty or already
+// contains an operator (user is past the field-name portion of the expression).
+func (v *View) filterACCandidates(text string) []string {
+	if filterInputOperatorIndex(text) >= 0 || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	needle := strings.ToLower(text)
+	all := v.state.data.fieldState.GetDiscoveredFields()
+	var matched []string
+	for _, f := range all {
+		if strings.Contains(strings.ToLower(f), needle) {
+			matched = append(matched, f)
+		}
+	}
+	return matched
+}

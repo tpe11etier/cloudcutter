@@ -67,7 +67,7 @@ func TestGetAvailableFields(t *testing.T) {
 		{
 			name:         "Nested and List Fields",
 			source:       []byte(`{"nested":{"innerField":"value"},"list":["item1","item2"]}`),
-			expectFields: []string{"_id", "_index", "_type", "nested.innerField", "list"},
+			expectFields: []string{"_id", "_index", "_type", "nested", "nested.innerField", "list"},
 		},
 	}
 
