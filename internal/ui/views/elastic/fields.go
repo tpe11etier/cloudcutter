@@ -379,42 +379,25 @@ func (fs *FieldState) Reset() {
 	fs.fieldOrder = make([]string, 0)
 }
 
-// UpdateFromDocuments updates discovered fields from document results.
-// Returns true when the field set changed and the UI needs a rebuild.
+// UpdateFromDocuments merges fields from document results into the discovered
+// set. Fields are only ever added here; the set shrinks only when resetFieldState
+// is called (on index or profile change). This prevents a narrowing filter from
+// collapsing the Available Fields list.
+// Returns true when any new field was added and the UI needs a rebuild.
 func (fs *FieldState) UpdateFromDocuments(docs []*DocEntry) bool {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	newFields := make(map[string]struct{})
+	changed := false
 	for _, doc := range docs {
-		fields := doc.GetAvailableFields()
-		for _, field := range fields {
-			newFields[field] = struct{}{}
-		}
-	}
-
-	if len(newFields) == len(fs.discoveredFields) {
-		allMatch := true
-		for field := range fs.discoveredFields {
-			if _, ok := newFields[field]; !ok {
-				allMatch = false
-				break
+		for _, field := range doc.GetAvailableFields() {
+			if _, ok := fs.discoveredFields[field]; !ok {
+				fs.discoveredFields[field] = struct{}{}
+				changed = true
 			}
 		}
-		if allMatch {
-			return false
-		}
 	}
-
-	fs.discoveredFields = newFields
-
-	for field := range fs.selectedFields {
-		if _, ok := newFields[field]; !ok {
-			delete(fs.selectedFields, field)
-			fs.fieldOrder = removeString(fs.fieldOrder, field)
-		}
-	}
-	return true
+	return changed
 }
 
 // GetDiscoveredFields returns a sorted list of all discovered fields

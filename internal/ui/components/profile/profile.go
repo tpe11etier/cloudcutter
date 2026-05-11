@@ -78,16 +78,10 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 
 func (ps *Selector) ShowSelector() (tview.Primitive, error) {
 	numEntries := ps.GetItemCount() + 2
-	modal := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(ps, 30, 0, true).
-			AddItem(nil, 0, 1, false),
-			numEntries, 1, true).
-		AddItem(nil, 0, 1, false)
-
+	modal := tview.NewGrid().
+		SetRows(0, numEntries, 0).
+		SetColumns(0, 30, 0).
+		AddItem(ps, 1, 1, 1, 1, 0, 0, true)
 	ps.manager.Pages().AddPage("profileSelector", modal, true, true)
 	return ps, nil
 }

@@ -137,7 +137,7 @@ func (vm *Manager) initialize() {
 func (vm *Manager) setupLayout() {
 	vm.layout = tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(vm.header, 8, 0, false).
+		AddItem(vm.header, vm.header.GetHeight(), 0, false).
 		AddItem(vm.pages, 0, 1, true).
 		AddItem(vm.statusBar, 1, 0, false)
 }
@@ -182,7 +182,7 @@ func (vm *Manager) setupPrompts() {
 }
 
 func (vm *Manager) showModal(name string, content tview.Primitive, width int, height int) {
-	modal := vm.createModalFlex(content, width, height)
+	modal := centeredModal(content, width, height)
 	vm.pages.AddPage(name, modal, true, true)
 }
 
@@ -193,16 +193,11 @@ func (vm *Manager) HideModal(name string) {
 	}
 }
 
-func (vm *Manager) createModalFlex(content tview.Primitive, width int, height int) tview.Primitive {
-	return tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(content, width, 0, true).
-			AddItem(nil, 0, 1, false),
-			height, 1, true).
-		AddItem(nil, 0, 1, false)
+func centeredModal(content tview.Primitive, width int, height int) tview.Primitive {
+	return tview.NewGrid().
+		SetRows(0, height, 0).
+		SetColumns(0, width, 0).
+		AddItem(content, 1, 1, 1, 1, 0, 0, true)
 }
 
 func (vm *Manager) handleCommand(command string) (newFocus tview.Primitive) {
@@ -463,6 +458,7 @@ func (vm *Manager) SwitchToView(name string) error {
 			vm.App().QueueUpdateDraw(func() {
 				if err != nil {
 					vm.logger.Error("Failed to initialize lazy view", "view", name, "error", err)
+					vm.statusBar.SetText(fmt.Sprintf("Cannot open %s: %v", name, err))
 					vm.hideLoading()
 					return
 				}
@@ -886,7 +882,10 @@ func (vm *Manager) switchToEnvironment(name string) {
 
 		if err := vm.reinitializeActiveView(); err != nil {
 			vm.app.QueueUpdateDraw(func() {
-				vm.statusBar.SetText(fmt.Sprintf("Reinit failed: %v", err))
+				if vm.activeView != nil {
+					vm.activeView.Hide()
+				}
+				vm.activeView = nil
 				if needsLoginModal {
 					vm.ShowJWTLoginModal(env,
 						func() { vm.switchToEnvironment(name) },
@@ -894,13 +893,13 @@ func (vm *Manager) switchToEnvironment(name string) {
 					)
 				}
 			})
-			return
 		}
 
-		if err := vm.SwitchToView(ViewElastic); err != nil {
-			vm.Logger().Error("Failed to switch to Elastic", "error", err)
+		if vm.activeView == nil && sess.Environment.Transport.Type != "" {
+			if err := vm.SwitchToView(ViewElastic); err != nil {
+				vm.Logger().Error("Failed to switch to Elastic", "error", err)
+			}
 		}
-
 		vm.StatusChan <- fmt.Sprintf("Switched to %s", sess.Environment.Name)
 	})
 }
@@ -1016,16 +1015,7 @@ func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess fun
 
 	height := 5 + 2*len(loginSpec.BodyFields)
 	width := 60
-	layout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().
-			AddItem(nil, 0, 1, false).
-			AddItem(form, width, 0, true).
-			AddItem(nil, 0, 1, false),
-			height, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	vm.pages.AddPage(pageName, layout, true, true)
+	vm.pages.AddPage(pageName, centeredModal(form, width, height), true, true)
 	vm.app.SetFocus(form)
 }
 

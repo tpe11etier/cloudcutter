@@ -32,8 +32,9 @@ func NewResolver(cfg *config.Config, awsProfiles []string) *Resolver {
 	return r
 }
 
-// List returns the union of explicit environment names and AWS profile
-// names. Order is undefined; callers should sort if presenting in UI.
+// List returns the names available in the picker. Explicit environments
+// are always included. Auto-discovered AWS profiles are only included when
+// default_aws_backend is defined — otherwise they have no config to back them.
 func (r *Resolver) List() []string {
 	seen := make(map[string]struct{}, len(r.explicit)+len(r.awsProfiles))
 	out := make([]string, 0, len(r.explicit)+len(r.awsProfiles))
@@ -41,12 +42,14 @@ func (r *Resolver) List() []string {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	for _, name := range r.awsProfiles {
-		if _, ok := seen[name]; ok {
-			continue
+	if r.cfg.DefaultAWSBackend != nil {
+		for _, name := range r.awsProfiles {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
 		}
-		seen[name] = struct{}{}
-		out = append(out, name)
 	}
 	return out
 }

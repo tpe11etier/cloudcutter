@@ -25,9 +25,21 @@ type Session struct {
 	Region  string
 	// Environment is the resolved description of the active backend, populated by SwitchEnvironment.
 	Environment environments.Environment
-	// Token is the JWT for jwt-typed environments. Empty for aws_sdk and
-	// none. Populated by SwitchEnvironment from Auth.Env or Auth.Path.
+	// Token is the JWT for jwt-typed environments. Empty for aws_sdk and none.
 	Token string
+	// DynamoDBConfig holds AWS credentials for DynamoDB when the primary auth
+	// is non-AWS (e.g. jwt). Loaded from Environment.AWSProfile if set.
+	DynamoDBConfig *aws.Config
+}
+
+// AWSConfigForDynamoDB returns the AWS config to use for DynamoDB. When the
+// environment has a separate aws_profile, its config is returned; otherwise
+// falls back to the primary session config (aws_sdk environments).
+func (s *Session) AWSConfigForDynamoDB() aws.Config {
+	if s.DynamoDBConfig != nil {
+		return *s.DynamoDBConfig
+	}
+	return s.Config
 }
 
 type Authenticator struct {
@@ -131,6 +143,14 @@ func (a *Authenticator) SwitchEnvironment(ctx context.Context, env environments.
 
 	default:
 		return nil, fmt.Errorf("unknown auth.type %q (want none|aws_sdk|jwt)", env.Auth.Type)
+	}
+
+	if env.AWSProfile != "" && env.Auth.Type != "aws_sdk" {
+		ddbCfg, err := a.authenticateStandard(ctx, env.AWSProfile, env.Region)
+		if err != nil {
+			return nil, fmt.Errorf("aws_profile %q: %w", env.AWSProfile, err)
+		}
+		session.DynamoDBConfig = &ddbCfg
 	}
 
 	a.mu.Lock()
