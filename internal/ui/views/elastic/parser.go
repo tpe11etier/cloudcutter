@@ -212,9 +212,35 @@ func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) 
 			if startsWithWildcard {
 				return nil, &ParseError{Field: fieldName, Message: "wildcard query cannot start with *"}
 			}
+
+			trailingStarOnly := strings.HasSuffix(value, "*") &&
+				!strings.ContainsAny(strings.TrimSuffix(value, "*"), "*?")
+
+			if metadata.Type == "text" {
+				// match_phrase_prefix works on analyzed text and avoids the
+				// "expensive queries" cluster restriction that wildcard hits.
+				if trailingStarOnly {
+					return map[string]any{
+						"match_phrase_prefix": map[string]any{
+							fieldName: strings.TrimSuffix(unescapeValue(value), "*"),
+						},
+					}, nil
+				}
+				return nil, &ParseError{Field: fieldName, Message: "mid-string wildcards not supported on text fields; use a trailing * for prefix search"}
+			}
+
+			// For keyword and flattened keyed fields: prefix query for trailing-*
+			// (supported on flattened fields; wildcard and match_phrase_prefix are not).
+			if trailingStarOnly {
+				return map[string]any{
+					"prefix": map[string]any{
+						fieldName: strings.ToLower(strings.TrimSuffix(unescapeValue(value), "*")),
+					},
+				}, nil
+			}
 			return map[string]any{
 				"wildcard": map[string]any{
-					fieldName: unescapeValue(value),
+					fieldName: strings.ToLower(unescapeValue(value)),
 				},
 			}, nil
 		}

@@ -221,13 +221,28 @@ func TestParseFilter(t *testing.T) {
 			errContains: "wildcard query cannot start with *",
 		},
 		{
-			name:   "Valid wildcard query",
+			name:   "Valid wildcard query on keyword field",
 			filter: "name=john*",
 			want: map[string]any{
-				"wildcard": map[string]any{
-					"name": "john*",
+				"prefix": map[string]any{
+					"name": "john",
 				},
 			},
+		},
+		{
+			name:   "Wildcard on text field uses match_phrase_prefix",
+			filter: "description=test*",
+			want: map[string]any{
+				"match_phrase_prefix": map[string]any{
+					"description": "test",
+				},
+			},
+		},
+		{
+			name:        "Mid-string wildcard on text field is rejected",
+			filter:      "description=te*st",
+			wantErr:     true,
+			errContains: "mid-string wildcards not supported on text fields",
 		},
 		{
 			name:   "Valid range query - greater than",
@@ -273,13 +288,10 @@ func TestParseFilter(t *testing.T) {
 			},
 		},
 		{
-			name:   "Wildcard query with unescaped wildcard",
-			filter: "description=test*product",
-			want: map[string]any{
-				"wildcard": map[string]any{
-					"description": "test*product",
-				},
-			},
+			name:        "Mid-string wildcard on text field is rejected",
+			filter:      "description=test*product",
+			wantErr:     true,
+			errContains: "mid-string wildcards not supported on text fields",
 		},
 		{
 			name:   "Match query with multiple escaped characters",
@@ -291,13 +303,10 @@ func TestParseFilter(t *testing.T) {
 			},
 		},
 		{
-			name:   "Wildcard query with mixed escaped and unescaped",
-			filter: "description=test\\**product",
-			want: map[string]any{
-				"wildcard": map[string]any{
-					"description": "test**product",
-				},
-			},
+			name:        "Mixed escaped and unescaped wildcard on text field is rejected",
+			filter:      "description=test\\**product",
+			wantErr:     true,
+			errContains: "mid-string wildcards not supported on text fields",
 		},
 		{
 			name:   "Valid field name with dots",

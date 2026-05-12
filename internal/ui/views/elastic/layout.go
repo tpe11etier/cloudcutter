@@ -345,6 +345,27 @@ func (v *View) setupLayout() {
 	v.components.filterInput = v.manager.GetPrimitiveByID("filterInput").(*tview.InputField)
 	v.components.activeFilters = v.manager.GetPrimitiveByID("activeFilters").(*tview.TextView)
 	v.components.indexInput = v.manager.GetPrimitiveByID("indexInput").(*tview.InputField)
+	v.components.indexInput.SetAutocompleteFunc(func(currentText string) []string {
+		return v.filterIndices(currentText)
+	})
+	v.components.indexInput.SetAutocompletedFunc(func(text string, index int, source int) bool {
+		if source == tview.AutocompletedNavigate {
+			return false
+		}
+		v.components.indexInput.SetText(text)
+		v.commitIndexInput()
+		return true
+	})
+	v.components.indexInput.SetAutocompleteStyles(
+		tcell.ColorBlack,
+		tcell.StyleDefault.Foreground(tcell.ColorBeige),
+		tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan),
+	)
+	v.components.indexInput.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEnter {
+			v.commitIndexInput()
+		}
+	})
 	v.components.localFilterInput = v.manager.GetPrimitiveByID("localFilterInput").(*tview.InputField)
 	v.components.timeframeInput = v.manager.GetPrimitiveByID("timeframeInput").(*tview.InputField)
 	v.components.numResultsInput = v.manager.GetPrimitiveByID("numResultsInput").(*tview.InputField)
@@ -411,11 +432,22 @@ func (v *View) updateHeader() {
 		indexInfo = v.state.search.currentIndex
 	}
 
+	total := len(v.state.data.displayedResults)
+	pageSize := v.state.pagination.pageSize
+	currentPage := v.state.pagination.currentPage
+	rangeStart := (currentPage-1)*pageSize + 1
+	rangeEnd := currentPage * pageSize
+	if rangeEnd > total {
+		rangeEnd = total
+	}
+	if total == 0 {
+		rangeStart = 0
+	}
+
 	summary = append(summary,
 		types.SummaryItem{Key: "Index", Value: indexInfo},
 		types.SummaryItem{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
-		types.SummaryItem{Key: "Results", Value: fmt.Sprintf("%d", len(v.state.data.displayedResults))},
-		types.SummaryItem{Key: "Page", Value: fmt.Sprintf("[%s::b]%d/%d[-]", style.GruvboxMaterial.Yellow, v.state.pagination.currentPage, v.state.pagination.totalPages)},
+		types.SummaryItem{Key: "Showing", Value: fmt.Sprintf("[%s::b]%d-%d of %d[-]", style.GruvboxMaterial.Yellow, rangeStart, rangeEnd, total)},
 		types.SummaryItem{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
 	)
 
@@ -439,13 +471,10 @@ func (v *View) updateResultsLayout() {
 	}
 }
 
-func (v *View) updateStatusBar(currentPageSize int) {
+func (v *View) updateStatusBar(rangeStart, rangeEnd int) {
 	filterText := v.components.localFilterInput.GetText()
-	statusMsg := fmt.Sprintf("Page %d/%d | Showing %d of %d logs",
-		v.state.pagination.currentPage,
-		v.state.pagination.totalPages,
-		currentPageSize,
-		len(v.state.data.displayedResults))
+	total := len(v.state.data.displayedResults)
+	statusMsg := fmt.Sprintf("%d-%d of %d", rangeStart, rangeEnd, total)
 
 	if filterText != "" {
 		statusMsg += fmt.Sprintf(" (filtered: %q)", filterText)

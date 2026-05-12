@@ -11,6 +11,41 @@ type ESSearchResult struct {
 	TimedOut bool         `json:"timed_out"`
 	Hits     ESSearchHits `json:"hits"`
 	ScrollID string       `json:"_scroll_id,omitempty"`
+	Error    *ESError     `json:"error,omitempty"`
+}
+
+// ESError holds the error body ES returns on non-2xx responses.
+type ESError struct {
+	Type         string      `json:"type"`
+	Reason       string      `json:"reason"`
+	CausedBy     *ESError    `json:"caused_by,omitempty"`
+	FailedShards []ESShardError `json:"failed_shards,omitempty"`
+}
+
+type ESShardError struct {
+	Reason *ESError `json:"reason,omitempty"`
+}
+
+func (e *ESError) rootCause() *ESError {
+	// Prefer the first failed shard's cause — it has the real reason.
+	if len(e.FailedShards) > 0 && e.FailedShards[0].Reason != nil {
+		return e.FailedShards[0].Reason.rootCause()
+	}
+	if e.CausedBy != nil {
+		return e.CausedBy.rootCause()
+	}
+	return e
+}
+
+func (e *ESError) Error() string {
+	root := e.rootCause()
+	if root != e {
+		return fmt.Sprintf("%s: %s", e.Type, root.Error())
+	}
+	if e.Type != "" {
+		return fmt.Sprintf("%s: %s", e.Type, e.Reason)
+	}
+	return e.Reason
 }
 
 // ESSearchHits contains the hits part of the response

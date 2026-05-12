@@ -76,6 +76,9 @@ func (v *View) fetchRegularResults(query map[string]any, numResults int, index s
 			)
 			return nil, fmt.Errorf("error decoding response (status %d, content-type %s): %v — body logged", res.StatusCode, res.Header.Get("Content-Type"), err)
 		}
+		if result.Error != nil {
+			return nil, fmt.Errorf("elasticsearch error: %v", result.Error)
+		}
 
 		entries, err := v.processSearchResults(result.Hits.Hits)
 		if err != nil {
@@ -141,6 +144,9 @@ func (v *View) fetchLargeResults(query map[string]any, index string) (*searchRes
 		var result elastic.ESSearchResult
 		if err := json.Unmarshal(bodyBytes, &result); err != nil {
 			return nil, fmt.Errorf("error decoding response: %v", err)
+		}
+		if result.Error != nil {
+			return nil, fmt.Errorf("elasticsearch error: %v", result.Error)
 		}
 
 		entries, err := v.processSearchResults(result.Hits.Hits)
@@ -297,6 +303,9 @@ func (v *View) fetchResults() (*searchResult, error) {
 	currentIndex := v.state.search.currentIndex
 	v.state.mu.RUnlock()
 
+	if query == nil {
+		return nil, fmt.Errorf("failed to build query")
+	}
 	if numResults > 10000 {
 		return v.fetchLargeResults(query, currentIndex)
 	}
@@ -341,6 +350,7 @@ func (v *View) refreshResults() {
 		v.state.mu.Lock()
 		v.state.data.filteredResults = searchResult.entries
 		v.state.data.displayedResults = append([]*DocEntry(nil), searchResult.entries...)
+		v.state.pagination.currentPage = 1
 		v.state.pagination.totalPages = int(math.Ceil(float64(len(searchResult.entries)) /
 			float64(v.state.pagination.pageSize)))
 		if v.state.pagination.totalPages < 1 {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -16,11 +17,50 @@ func (v *View) filterInputACOpen() bool {
 	return len(v.filterACCandidates(v.components.filterInput.GetText())) > 0
 }
 
+
+// filterIndices returns indices that contain text as a case-insensitive substring.
+// Returns all indices when text is empty.
+func (v *View) filterIndices(text string) []string {
+	v.state.mu.RLock()
+	indices := v.state.search.matchingIndices
+	v.state.mu.RUnlock()
+	if text == "" {
+		return indices
+	}
+	lower := strings.ToLower(text)
+	var matches []string
+	for _, idx := range indices {
+		if strings.Contains(strings.ToLower(idx), lower) {
+			matches = append(matches, idx)
+		}
+	}
+	return matches
+}
+
+// indexInputACOpen returns true when the index autocomplete dropdown is showing.
+// Returns false for an exact match so Tab can cycle focus once the user has selected an index.
+func (v *View) indexInputACOpen() bool {
+	text := v.components.indexInput.GetText()
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	matches := v.filterIndices(text)
+	for _, idx := range matches {
+		if strings.ToLower(idx) == lower {
+			return false // exact match — user is done, let Tab/Enter commit
+		}
+	}
+	return len(matches) > 0
+}
+
 func (v *View) handleTabKey(currentFocus tview.Primitive) *tcell.EventKey {
 	if currentFocus == v.components.filterInput && v.filterInputACOpen() {
 		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
 	}
-
+	if currentFocus == v.components.indexInput && v.indexInputACOpen() {
+		return tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	}
 	switch currentFocus {
 	case v.components.filterInput:
 		v.manager.App().SetFocus(v.components.activeFilters)
@@ -105,6 +145,46 @@ func (v *View) handleActiveFilters(event *tcell.EventKey) *tcell.EventKey {
 	return event
 }
 
+func (v *View) commitIndexInput() {
+	newIndex := v.components.indexInput.GetText()
+	if newIndex == "" {
+		return
+	}
+
+	v.state.mu.Lock()
+	indexChanged := newIndex != v.state.search.currentIndex
+	v.state.search.currentIndex = newIndex
+	if indexChanged {
+		v.state.data.ResetFields()
+	}
+	v.state.mu.Unlock()
+
+	if indexChanged {
+		v.components.fieldList.Clear()
+		v.components.selectedList.Clear()
+		v.showLoading("Loading fields...")
+
+		go func() {
+			if err := v.loadFields(); err != nil {
+				v.manager.Logger().Error("Failed to load fields for new index", "error", err)
+				v.manager.App().QueueUpdateDraw(func() {
+					v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
+				})
+				return
+			}
+
+			v.manager.App().QueueUpdateDraw(func() {
+				v.rebuildFieldList()
+				v.manager.UpdateStatusBar("Fields loaded successfully")
+			})
+
+			v.refreshWithCurrentTimeframe()
+		}()
+	} else {
+		v.refreshWithCurrentTimeframe()
+	}
+}
+
 func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 	if shortcut := v.handleCommonShortcuts(event); shortcut == nil {
 		return nil
@@ -115,41 +195,7 @@ func (v *View) handleIndexInput(event *tcell.EventKey) *tcell.EventKey {
 		v.components.indexInput.SetText(v.state.search.currentIndex)
 		return nil
 	case tcell.KeyEnter:
-		newIndex := v.components.indexInput.GetText()
-		if newIndex == "" {
-			return nil
-		}
-
-		v.state.mu.Lock()
-		indexChanged := newIndex != v.state.search.currentIndex
-		v.state.search.currentIndex = newIndex
-		v.state.mu.Unlock()
-
-		if indexChanged {
-			v.components.fieldList.Clear()
-			v.components.selectedList.Clear()
-			v.showLoading("Loading fields...")
-
-			go func() {
-				if err := v.loadFields(); err != nil {
-					v.manager.Logger().Error("Failed to load fields for new index", "error", err)
-					v.manager.App().QueueUpdateDraw(func() {
-						v.manager.UpdateStatusBar(fmt.Sprintf("Error loading fields: %v", err))
-					})
-					return
-				}
-
-				v.manager.App().QueueUpdateDraw(func() {
-					v.rebuildFieldList()
-					v.manager.UpdateStatusBar("Fields loaded successfully")
-				})
-
-				v.refreshWithCurrentTimeframe()
-			}()
-		} else {
-			v.refreshWithCurrentTimeframe()
-		}
-		return nil
+		return event // always pass through — tview handles AC selection or fires SetDoneFunc
 	}
 	return event
 }
@@ -255,13 +301,13 @@ func (v *View) handleFieldList(event *tcell.EventKey) *tcell.EventKey {
 		}
 
 	case tcell.KeyEnter:
-		// Field list only handles activation
 		index := v.components.fieldList.GetCurrentItem()
 		if index >= 0 && index < v.components.fieldList.GetItemCount() {
 			mainText, _ := v.components.fieldList.GetItemText(index)
 			v.toggleField(mainText)
 		}
 		return nil
+
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		v.state.ui.fieldListFilter = ""
 		v.filterFieldList("")

@@ -152,7 +152,6 @@ func (v *View) InputHandler() func(event *tcell.EventKey) *tcell.EventKey {
 			case v.components.resultsTable:
 				v.showFilterPrompt(v.components.resultsTable)
 				return nil
-
 			}
 		}
 

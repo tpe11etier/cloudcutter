@@ -116,6 +116,6 @@ func (v *View) displayCurrentPage() {
 
 	table.SetOffset(oldRowOffset, oldColOffset)
 
-	v.updateStatusBar(len(pageResults))
+	v.updateStatusBar(start+1, end)
 	v.updateHeader()
 }

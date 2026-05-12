@@ -20,6 +20,8 @@ cloudcutter init
 
 This reads your legacy config files and writes `~/.cloudcutter/config.yaml` automatically. After that, launch normally — if a JWT environment has no saved token, the login form appears on its own.
 
+Pass `--force` to overwrite an existing `config.yaml`.
+
 ### Fresh install
 
 Build and run:
@@ -187,6 +189,43 @@ vars:
     - { match: "^.*", env: MY_CLUSTER_ID }
 ```
 
+### Environment variable expansion
+
+Any string value in `config.yaml` can embed environment variables using `${VAR}` or `${VAR:-default}`. Expansion happens before YAML parsing, so it works in every field.
+
+- `${VAR}` — expands to the value of `VAR`; empty string if unset
+- `${VAR:-default}` — expands to `default` when `VAR` is unset **or** empty
+- `$$` — a literal dollar sign
+
+```yaml
+transport:
+  type: plain
+  base_url: ${ES_BASE_URL:-http://localhost:9200}
+auth:
+  type: jwt
+  env: ${PLATFORM_TOKEN_ENV:-MY_AUTH_TOKEN}
+```
+
+### DynamoDB auth (`aws_profile`)
+
+For environments that use `jwt` auth (Elasticsearch via a token), DynamoDB still needs AWS credentials. Set `aws_profile` to an AWS profile name and cloudcutter loads it separately for DynamoDB.
+
+```yaml
+environments:
+  - name: my-platform
+    auth:
+      type: jwt
+      path: ~/.cloudcutter/my-platform.token
+      ...
+    transport:
+      ...
+    aws_profile: my-aws-profile    # loaded from ~/.aws/credentials for DynamoDB
+    time_fields:
+      - { name: "@timestamp", format: date }
+```
+
+If `aws_profile` is omitted on a `jwt` or `none` environment, DynamoDB is unavailable. On `aws_sdk` environments the primary session is used automatically.
+
 ### Time fields
 
 Tells cloudcutter how to encode timestamps in queries. Required for timeframe filtering in the Elasticsearch view.
@@ -250,6 +289,7 @@ environments:
       probe:
         path: _cluster/health
         reject_html: true
+    aws_profile: my-aws-profile    # optional: AWS credentials for DynamoDB
     index_pattern: "logs-*"
     time_fields:
       - { name: "@timestamp", format: date }
