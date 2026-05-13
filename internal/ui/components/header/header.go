@@ -89,7 +89,7 @@ func (h *Header) setupLeftTable() {
 	}
 
 	for i, action := range h.actions {
-		actionText := fmt.Sprintf("[mediumturquoise]%-10s [beige]%s", action.Shortcut, action.Description)
+		actionText := fmt.Sprintf("[%s]%-10s [%s]%s", style.Active.Border, action.Shortcut, style.Active.FieldText, action.Description)
 		actionCell := tview.NewTableCell(actionText).
 			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
@@ -106,7 +106,7 @@ func (h *Header) UpdateEnvVar(key, value string) {
 		h.envVarRowMap[key] = row
 	}
 
-	envText := fmt.Sprintf("[mediumturquoise]%-10s: [beige]%s", key, value)
+	envText := fmt.Sprintf("[%s]%-10s: [%s]%s", style.Active.Border, key, style.Active.FieldText, value)
 	envCell := tview.NewTableCell(envText).
 		SetTextColor(style.Active.FieldText).
 		SetAlign(tview.AlignLeft).
@@ -163,12 +163,34 @@ func (h *Header) setupLeftMidTable() {
 		SetAttributes(tcell.AttrBold))
 }
 
+// Retheme re-applies all style.Active colors to the header's persistent cells.
+// Call this after switching the active theme.
+func (h *Header) Retheme() {
+	h.SetTitleColor(style.Active.Title)
+	h.SetBorderColor(style.Active.Border)
+	h.SetBackgroundColor(style.Active.Background)
+	for _, t := range []*tview.Table{h.leftTable, h.leftMidTable, h.rightMidTable, h.rightTable} {
+		t.SetBackgroundColor(style.Active.Background)
+	}
+	h.leftTable.Clear()
+	h.setupLeftTable()
+	// Re-populate env vars so their inline color tags regenerate with new colors.
+	saved := make(map[string]string, len(h.envVars))
+	for k, v := range h.envVars {
+		saved[k] = v
+	}
+	h.envVarRowMap = make(map[string]int)
+	for k, v := range saved {
+		h.UpdateEnvVar(k, v)
+	}
+}
+
 func (h *Header) SetViewCommands(commands []ViewCommands) {
 	h.leftMidTable.Clear()
 	h.setupLeftMidTable()
 
 	for i, cmd := range commands {
-		cmdText := fmt.Sprintf("[mediumturquoise]%-10s [beige]%s", cmd.View, cmd.Description)
+		cmdText := fmt.Sprintf("[%s]%-10s [%s]%s", style.Active.Border, cmd.View, style.Active.FieldText, cmd.Description)
 		cmdCell := tview.NewTableCell(cmdText).
 			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).

@@ -129,9 +129,19 @@ func NewViewManager(ctx context.Context, app *ui.App, log *logger.Logger, resolv
 }
 
 func (vm *Manager) initialize() {
+	vm.applyTviewStyles()
 	vm.setupLayout()
 	vm.setupPrompts()
 	vm.startStatusListener()
+}
+
+func (vm *Manager) applyTviewStyles() {
+	t := style.Active
+	tview.Styles.PrimitiveBackgroundColor = t.Background
+	tview.Styles.BorderColor = t.Border
+	tview.Styles.TitleColor = t.Title
+	tview.Styles.PrimaryTextColor = t.Foreground
+	tview.Styles.SecondaryTextColor = t.Subtle
 }
 
 func (vm *Manager) setupLayout() {
@@ -608,6 +618,22 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 
 func (vm *Manager) SwitchTheme(t *style.Theme) {
 	style.SetActive(t)
+
+	// Update tview's global defaults so all newly constructed primitives pick up
+	// the theme background and text colors.
+	tview.Styles.PrimitiveBackgroundColor = t.Background
+	tview.Styles.BorderColor = t.Border
+	tview.Styles.TitleColor = t.Title
+	tview.Styles.PrimaryTextColor = t.Foreground
+	tview.Styles.SecondaryTextColor = t.Subtle
+
+	// Recolor persistent manager-level components that aren't rebuilt on view switch.
+	vm.layout.SetBackgroundColor(t.Background)
+	vm.pages.SetBackgroundColor(t.Background)
+	vm.statusBar.SetBackgroundColor(t.Background)
+	vm.statusBar.SetTextColor(t.Border)
+	vm.header.Retheme()
+
 	if vm.activeView != nil {
 		name := vm.activeView.Name()
 		delete(vm.views, name)
