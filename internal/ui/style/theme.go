@@ -21,7 +21,7 @@ type Theme struct {
 	VisualSelectionFg tcell.Color
 	VisualSelectionBg tcell.Color
 
-	Subtle tcell.Color
+	Subtle      tcell.Color
 
 	StatusOK    tcell.Color
 	StatusError tcell.Color
@@ -38,76 +38,10 @@ var Active *Theme
 
 func SetActive(t *Theme) { Active = t }
 
-func init() {
-	Active = CloudCutterModern
-}
-
-var CloudCutterModern = &Theme{
-	Background: tcell.NewRGBColor(243, 241, 236), // #f3f1ec warm paper
-	Foreground: tcell.NewRGBColor(47, 53, 66),    // #2f3542
-
-	Border: tcell.NewRGBColor(216, 212, 204), // #d8d4cc
-	Title:  tcell.NewRGBColor(23, 179, 163),  // #17b3a3
-	Accent: tcell.NewRGBColor(23, 179, 163),  // #17b3a3
-
-	FieldText: tcell.NewRGBColor(58, 65, 78),    // #3a414e
-	FieldBg:   tcell.NewRGBColor(248, 247, 244), // #f8f7f4
-
-	SelectionFg: tcell.NewRGBColor(255, 255, 255),
-	SelectionBg: tcell.NewRGBColor(45, 140, 130),  // #2d8c82
-	CursorFg:    tcell.NewRGBColor(47, 53, 66),
-	CursorBg:    tcell.NewRGBColor(215, 243, 238), // #d7f3ee
-
-	VisualSelectionFg: tcell.NewRGBColor(47, 53, 66),
-	VisualSelectionBg: tcell.NewRGBColor(224, 247, 243), // #e0f7f3
-
-	Subtle: tcell.NewRGBColor(154, 163, 175), // #9aa3af
-
-	StatusOK:    tcell.NewRGBColor(46, 125, 50),   // muted green
-	StatusError: tcell.NewRGBColor(239, 107, 115), // soft red
-
-	JSONKey:     tcell.NewRGBColor(95, 141, 211),  // soft blue
-	JSONString:  tcell.NewRGBColor(46, 125, 50),   // green
-	JSONNumber:  tcell.NewRGBColor(233, 185, 73),  // amber
-	JSONBool:    tcell.NewRGBColor(126, 87, 194),  // muted purple
-	JSONNull:    tcell.NewRGBColor(239, 107, 115), // soft red
-	JSONBracket: tcell.NewRGBColor(189, 189, 189), // subtle gray
-}
-
-var CloudCutterDark = &Theme{
-	Background: tcell.NewRGBColor(24, 28, 34),
-	Foreground: tcell.NewRGBColor(222, 226, 230),
-
-	Border: tcell.NewRGBColor(58, 63, 72),
-	Title:  tcell.NewRGBColor(77, 208, 193),
-	Accent: tcell.NewRGBColor(77, 208, 193),
-
-	FieldText: tcell.NewRGBColor(222, 226, 230),
-	FieldBg:   tcell.NewRGBColor(31, 36, 43),
-
-	SelectionFg: tcell.NewRGBColor(255, 255, 255),
-	SelectionBg: tcell.NewRGBColor(38, 120, 110),
-	CursorFg:    tcell.NewRGBColor(255, 255, 255),
-	CursorBg:    tcell.NewRGBColor(52, 73, 94),
-
-	VisualSelectionFg: tcell.NewRGBColor(255, 255, 255),
-	VisualSelectionBg: tcell.NewRGBColor(44, 62, 80),
-
-	Subtle: tcell.NewRGBColor(130, 138, 145),
-
-	StatusOK:    tcell.NewRGBColor(102, 187, 106),
-	StatusError: tcell.NewRGBColor(239, 107, 115),
-
-	JSONKey:     tcell.NewRGBColor(100, 181, 246),
-	JSONString:  tcell.NewRGBColor(129, 199, 132),
-	JSONNumber:  tcell.NewRGBColor(255, 213, 79),
-	JSONBool:    tcell.NewRGBColor(179, 157, 219),
-	JSONNull:    tcell.NewRGBColor(239, 107, 115),
-	JSONBracket: tcell.NewRGBColor(120, 120, 120),
-}
+func init() { Active = GruvboxDark }
 
 var GruvboxDark = &Theme{
-	Background: tcell.ColorBlack,
+	Background: tcell.ColorBlack, // matches tview's default; preserves original panel appearance
 	Foreground: GruvboxMaterial.Foreground,
 	Border:     tcell.ColorMediumTurquoise,
 	Title:      GruvboxMaterial.Yellow,
@@ -124,7 +58,7 @@ var GruvboxDark = &Theme{
 	VisualSelectionFg: tcell.ColorBlack,
 	VisualSelectionBg: tcell.ColorYellow,
 
-	Subtle: GruvboxMaterial.Gray,
+	Subtle:      GruvboxMaterial.Gray,
 
 	StatusOK:    GruvboxMaterial.Green,
 	StatusError: GruvboxMaterial.Red,
@@ -135,4 +69,36 @@ var GruvboxDark = &Theme{
 	JSONBool:    GruvboxMaterial.Purple,
 	JSONNull:    GruvboxMaterial.Red,
 	JSONBracket: GruvboxMaterial.Yellow,
+}
+
+var GruvboxLight = &Theme{
+	Background: tcell.NewRGBColor(255, 255, 255), // white
+	Foreground: tcell.NewRGBColor(33, 33, 33),    // #212121
+
+	Border: tcell.NewRGBColor(232, 232, 232), // #e8e8e8 barely-there gray
+	Title:  tcell.NewRGBColor(38, 166, 154),  // #26a69a teal 400 — matches mockup accent
+	Accent: tcell.NewRGBColor(38, 166, 154),  // #26a69a
+
+	FieldText: tcell.NewRGBColor(33, 33, 33),    // #212121
+	FieldBg:   tcell.NewRGBColor(250, 250, 250), // #fafafa near-white
+
+	SelectionFg: tcell.NewRGBColor(255, 255, 255), // white
+	SelectionBg: tcell.NewRGBColor(0, 121, 107),   // #00796b teal 700
+	CursorFg:    tcell.NewRGBColor(33, 33, 33),    // dark text on light bg
+	CursorBg:    tcell.NewRGBColor(224, 242, 241), // #e0f2f1 teal 50 — subtle row highlight
+
+	VisualSelectionFg: tcell.NewRGBColor(0, 77, 64),     // #004d40 teal 900
+	VisualSelectionBg: tcell.NewRGBColor(178, 223, 219), // #b2dfdb teal 100
+
+	Subtle: tcell.NewRGBColor(158, 158, 158), // #9e9e9e gray 500
+
+	StatusOK:    tcell.NewRGBColor(46, 125, 50),  // #2e7d32 green 800
+	StatusError: tcell.NewRGBColor(183, 28, 28),  // #b71c1c red 900
+
+	JSONKey:     tcell.NewRGBColor(21, 101, 192), // #1565c0 blue 800
+	JSONString:  tcell.NewRGBColor(46, 125, 50),  // #2e7d32 green 800
+	JSONNumber:  tcell.NewRGBColor(191, 54, 12),  // #bf360c deep-orange 900
+	JSONBool:    tcell.NewRGBColor(106, 27, 154), // #6a1b9a purple 900
+	JSONNull:    tcell.NewRGBColor(183, 28, 28),  // #b71c1c red 900
+	JSONBracket: tcell.NewRGBColor(189, 189, 189), // #bdbdbd gray 400 — very subtle
 }
