@@ -41,7 +41,7 @@ func SetActive(t *Theme) { Active = t }
 func init() { Active = GruvboxDark }
 
 var GruvboxDark = &Theme{
-	Background: GruvboxMaterial.Background,
+	Background: tcell.ColorBlack, // matches tview's default; preserves original panel appearance
 	Foreground: GruvboxMaterial.Foreground,
 	Border:     tcell.ColorMediumTurquoise,
 	Title:      GruvboxMaterial.Yellow,
