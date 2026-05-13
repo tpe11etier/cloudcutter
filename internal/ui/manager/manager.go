@@ -157,13 +157,13 @@ func (vm *Manager) setupPrompts() {
 		return matches
 	})
 
-	vm.prompt.InputField.SetFieldBackgroundColor(tcell.ColorBlack)
-	vm.prompt.InputField.SetFieldTextColor(tcell.ColorBeige)
+	vm.prompt.InputField.SetFieldBackgroundColor(style.Active.FieldBg)
+	vm.prompt.InputField.SetFieldTextColor(style.Active.FieldText)
 
 	vm.prompt.SetAutocompleteStyles(
-		tcell.ColorBlack,
-		tcell.StyleDefault.Foreground(tcell.ColorBeige),
-		tcell.StyleDefault.Background(tcell.ColorDarkCyan).Foreground(tcell.ColorBeige))
+		style.Active.FieldBg,
+		tcell.StyleDefault.Foreground(style.Active.FieldText),
+		tcell.StyleDefault.Background(style.Active.SelectionBg).Foreground(style.Active.FieldText))
 
 	vm.prompt.SetDoneFunc(func(command string) {
 		if newFocus := vm.handleCommand(command); newFocus != nil {
@@ -559,6 +559,20 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 
+	if event.Key() == tcell.KeyCtrlL {
+		if style.GruvboxLight != nil {
+			next := style.GruvboxLight
+			if style.Active == style.GruvboxLight {
+				next = style.GruvboxDark
+			}
+			vm.SwitchTheme(next)
+			vm.UpdateStatusBar("Theme toggled")
+		} else {
+			vm.UpdateStatusBar("No light theme defined")
+		}
+		return nil
+	}
+
 	if event.Key() == tcell.KeyRune {
 		switch event.Rune() {
 		case '?':
@@ -590,6 +604,15 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	return event
+}
+
+func (vm *Manager) SwitchTheme(t *style.Theme) {
+	style.SetActive(t)
+	if vm.activeView != nil {
+		name := vm.activeView.Name()
+		delete(vm.views, name)
+		_ = vm.SwitchToView(name)
+	}
 }
 
 func (vm *Manager) reinitializeViews() error {
@@ -687,12 +710,12 @@ func (vm *Manager) UpdateRegion(region string) {
 
 func (vm *Manager) showCmdPrompt() {
 	vm.prompt.InputField.SetLabel(" > ")
-	vm.prompt.InputField.SetLabelColor(tcell.ColorTeal)
+	vm.prompt.InputField.SetLabelColor(style.Active.Accent)
 	vm.prompt.SetTitle(" Command ")
-	vm.prompt.SetTitleColor(style.GruvboxMaterial.Yellow)
+	vm.prompt.SetTitleColor(style.Active.Title)
 	vm.prompt.SetBorder(true)
 	vm.prompt.SetTitleAlign(tview.AlignLeft)
-	vm.prompt.SetBorderColor(tcell.ColorMediumTurquoise)
+	vm.prompt.SetBorderColor(style.Active.Border)
 
 	vm.app.SetFocus(vm.prompt.InputField)
 
@@ -925,12 +948,12 @@ func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess fun
 	form.SetBorder(true)
 	form.SetTitle(fmt.Sprintf(" %s Login — %s (Tab to move, Enter to submit, Esc to cancel) ", env.Name, loginSpec.URL))
 	form.SetTitleAlign(tview.AlignLeft)
-	form.SetTitleColor(style.GruvboxMaterial.Yellow)
-	form.SetBorderColor(tcell.ColorMediumTurquoise)
-	form.SetFieldBackgroundColor(tcell.ColorBlack)
-	form.SetFieldTextColor(tcell.ColorBeige)
-	form.SetButtonBackgroundColor(tcell.ColorDarkCyan)
-	form.SetButtonTextColor(tcell.ColorBeige)
+	form.SetTitleColor(style.Active.Title)
+	form.SetBorderColor(style.Active.Border)
+	form.SetFieldBackgroundColor(style.Active.FieldBg)
+	form.SetFieldTextColor(style.Active.FieldText)
+	form.SetButtonBackgroundColor(style.Active.SelectionBg)
+	form.SetButtonTextColor(style.Active.FieldText)
 
 	for _, f := range loginSpec.BodyFields {
 		label := titleCase(f.Name)

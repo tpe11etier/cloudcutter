@@ -2,7 +2,6 @@ package help
 
 import (
 	"fmt"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
@@ -103,18 +102,18 @@ func (h *Help) setupLayout() {
 func (h *Help) addCategoryToTable(category *HelpCategory, row *int) {
 	h.table.SetCell(*row, 0,
 		tview.NewTableCell(fmt.Sprintf("[::b]%s", category.Title)).
-			SetTextColor(style.GruvboxMaterial.Yellow).
+			SetTextColor(style.Active.Title).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1))
 	*row++
 
 	for _, cmd := range category.Commands {
-		keyCell := tview.NewTableCell(fmt.Sprintf("  [mediumturquoise]%s", cmd.Key)).
-			SetTextColor(tcell.ColorMediumTurquoise).
+		keyCell := tview.NewTableCell(fmt.Sprintf("  [%s]%s", style.Active.Border, cmd.Key)).
+			SetTextColor(style.Active.Border).
 			SetAlign(tview.AlignLeft)
 
-		descCell := tview.NewTableCell(fmt.Sprintf("  [beige]%s", cmd.Description)).
-			SetTextColor(tcell.ColorBeige).
+		descCell := tview.NewTableCell(fmt.Sprintf("  [%s]%s", style.Active.FieldText, cmd.Description)).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft)
 
 		h.table.SetCell(*row, 0, keyCell)
@@ -135,8 +134,8 @@ func (h *Help) Show(pages *tview.Pages, onDone func()) {
 	h.SetBorder(true).
 		SetTitle(" Help ").
 		SetTitleAlign(tview.AlignCenter).
-		SetTitleColor(tcell.ColorMediumTurquoise).
-		SetBorderColor(tcell.ColorMediumTurquoise)
+		SetTitleColor(style.Active.Border).
+		SetBorderColor(style.Active.Border)
 
 	modal := tview.NewFlex().
 		SetDirection(tview.FlexRow).

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 func (v *View) nextPage() {
@@ -102,7 +103,7 @@ func (v *View) displayCurrentPage() {
 
 		for _, header := range headers {
 			cells[rowIdx][currentCol] = tview.NewTableCell(entry.GetFormattedValue(header)).
-				SetTextColor(tcell.ColorBeige).
+				SetTextColor(style.Active.FieldText).
 				SetAlign(tview.AlignLeft)
 			currentCol++
 		}

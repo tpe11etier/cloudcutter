@@ -52,8 +52,8 @@ func NewHeader() *Header {
 
 	header.SetTitle("[::b] Cloud Cutter ").
 		SetTitleAlign(tview.AlignCenter).
-		SetTitleColor(style.GruvboxMaterial.Yellow)
-	header.SetBorder(true).SetBorderColor(tcell.ColorMediumTurquoise)
+		SetTitleColor(style.Active.Title)
+	header.SetBorder(true).SetBorderColor(style.Active.Border)
 	header.SetDirection(tview.FlexColumn).
 		AddItem(header.leftTable, 0, 1, false).
 		AddItem(header.leftMidTable, 0, 1, false).
@@ -78,7 +78,7 @@ func (h *Header) setupLeftTable() {
 	headers := []string{"  Environment Variables", "", "  Actions"}
 	for col, headerText := range headers {
 		cell := tview.NewTableCell(headerText).
-			SetTextColor(style.GruvboxMaterial.Yellow).
+			SetTextColor(style.Active.Title).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
@@ -91,7 +91,7 @@ func (h *Header) setupLeftTable() {
 	for i, action := range h.actions {
 		actionText := fmt.Sprintf("[mediumturquoise]%-10s [beige]%s", action.Shortcut, action.Description)
 		actionCell := tview.NewTableCell(actionText).
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		h.leftTable.SetCell(i+1, 2, actionCell)
@@ -108,7 +108,7 @@ func (h *Header) UpdateEnvVar(key, value string) {
 
 	envText := fmt.Sprintf("[mediumturquoise]%-10s: [beige]%s", key, value)
 	envCell := tview.NewTableCell(envText).
-		SetTextColor(tcell.ColorBeige).
+		SetTextColor(style.Active.FieldText).
 		SetAlign(tview.AlignLeft).
 		SetSelectable(false)
 	h.leftTable.SetCell(row, 0, envCell)
@@ -120,26 +120,26 @@ func (h *Header) UpdateSummary(items []types.SummaryItem) {
 	h.rightMidTable.SetTitle("Summary").SetTitleAlign(tview.AlignRight)
 
 	h.rightMidTable.SetCell(0, 0, tview.NewTableCell("   Summary").
-		SetTextColor(style.GruvboxMaterial.Yellow).
+		SetTextColor(style.Active.Title).
 		SetAlign(tview.AlignCenter).
 		SetSelectable(false).
 		SetAttributes(tcell.AttrBold))
 
 	if len(items) == 0 {
 		h.rightMidTable.SetCell(0, 0, tview.NewTableCell("No Summary Available").
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false))
 		return
 	}
 
 	for i, item := range items {
-		keyCell := tview.NewTableCell(fmt.Sprintf("[mediumturquoise::b]%s: ", item.Key)).
-			SetTextColor(tcell.ColorMediumTurquoise).
+		keyCell := tview.NewTableCell(fmt.Sprintf("[%s::b]%s: ", style.Active.Border, item.Key)).
+			SetTextColor(style.Active.Border).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		valueCell := tview.NewTableCell(item.Value).
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		h.rightMidTable.SetCell(i+1, 0, keyCell)
@@ -157,7 +157,7 @@ func (h *Header) GetHeight() int {
 
 func (h *Header) setupLeftMidTable() {
 	h.leftMidTable.SetCell(0, 0, tview.NewTableCell("  View Commands").
-		SetTextColor(style.GruvboxMaterial.Yellow).
+		SetTextColor(style.Active.Title).
 		SetAlign(tview.AlignLeft).
 		SetSelectable(false).
 		SetAttributes(tcell.AttrBold))
@@ -170,7 +170,7 @@ func (h *Header) SetViewCommands(commands []ViewCommands) {
 	for i, cmd := range commands {
 		cmdText := fmt.Sprintf("[mediumturquoise]%-10s [beige]%s", cmd.View, cmd.Description)
 		cmdCell := tview.NewTableCell(cmdText).
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		h.leftMidTable.SetCell(i+1, 0, cmdCell)

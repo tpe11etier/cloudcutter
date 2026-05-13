@@ -37,15 +37,15 @@ func NewSelector(ph *Handler, onSelect func(profile string), onCancel func(), st
 	}
 
 	selector.
-		SetMainTextColor(style.GruvboxMaterial.Foreground).
+		SetMainTextColor(style.Active.Foreground).
 		SetSelectedStyle(tcell.StyleDefault.
-			Foreground(tcell.ColorLightYellow).
-			Background(tcell.ColorDarkCyan)).
+			Foreground(style.Active.SelectionFg).
+			Background(style.Active.SelectionBg)).
 		SetBorder(true).
 		SetTitle(" Select Environment ").
 		SetTitleAlign(tview.AlignCenter).
-		SetTitleColor(style.GruvboxMaterial.Foreground).
-		SetBorderColor(tcell.ColorMediumTurquoise)
+		SetTitleColor(style.Active.Foreground).
+		SetBorderColor(style.Active.Border)
 
 	if r := manager.Resolver(); r != nil {
 		selector.profiles = r.List()

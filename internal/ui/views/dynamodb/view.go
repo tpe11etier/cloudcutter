@@ -305,20 +305,20 @@ func (v *View) setupLayout() {
 						Border:      true,
 						Title:       " DynamoDB ",
 						TitleAlign:  tview.AlignCenter,
-						TitleColor:  tcell.ColorMediumTurquoise,
-						BorderColor: tcell.ColorMediumTurquoise,
-						TextColor:   tcell.ColorBeige,
+						TitleColor:  style.Active.Border,
+						BorderColor: style.Active.Border,
+						TextColor:   style.Active.FieldText,
 					},
-					SelectedTextColor:       tcell.ColorLightYellow,
-					SelectedBackgroundColor: tcell.ColorDarkCyan,
+					SelectedTextColor:       style.Active.SelectionFg,
+					SelectedBackgroundColor: style.Active.SelectionBg,
 				},
 				Properties: types.ListProperties{
 					Items: []string{},
 					OnFocus: func(list *tview.List) {
-						list.SetBorderColor(tcell.ColorMediumTurquoise)
+						list.SetBorderColor(style.Active.Border)
 					},
 					OnBlur: func(list *tview.List) {
-						list.SetBorderColor(tcell.ColorBeige)
+						list.SetBorderColor(style.Active.FieldText)
 					},
 					OnChanged: func(index int, mainText string, secondaryText string, shortcut rune) {
 						v.fetchTableDetails(mainText)
@@ -335,17 +335,17 @@ func (v *View) setupLayout() {
 				Style: types.TableStyle{
 					BaseStyle: types.BaseStyle{
 						Border:      true,
-						BorderColor: tcell.ColorBeige,
+						BorderColor: style.Active.FieldText,
 					},
-					SelectedTextColor:       tcell.ColorLightYellow,
-					SelectedBackgroundColor: tcell.ColorDarkCyan,
+					SelectedTextColor:       style.Active.SelectionFg,
+					SelectedBackgroundColor: style.Active.SelectionBg,
 				},
 				Properties: types.TableProperties{
 					OnFocus: func(table *tview.Table) {
-						table.SetBorderColor(tcell.ColorMediumTurquoise)
+						table.SetBorderColor(style.Active.Border)
 					},
 					OnBlur: func(table *tview.Table) {
-						table.SetBorderColor(tcell.ColorBeige)
+						table.SetBorderColor(style.Active.FieldText)
 					},
 				},
 			},
@@ -368,7 +368,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 	if len(items) == 0 {
 		v.dataTable.SetCell(0, 0,
 			tview.NewTableCell("No items found").
-				SetTextColor(tcell.ColorBeige).
+				SetTextColor(style.Active.FieldText).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false))
 		return
@@ -407,7 +407,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 
 	for col, header := range displayHeaders {
 		cell := tview.NewTableCell(header).
-			SetTextColor(style.GruvboxMaterial.Yellow).
+			SetTextColor(style.Active.Title).
 			SetAlign(tview.AlignCenter).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
@@ -430,7 +430,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 		if v.state.showRowNumbers {
 			v.dataTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(fmt.Sprintf("%d", start+rowIdx+1)).
-					SetTextColor(tcell.ColorGray).
+					SetTextColor(style.Active.Subtle).
 					SetAlign(tview.AlignRight).
 					SetMaxWidth(3).
 					SetExpansion(0).
@@ -442,7 +442,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 			value := attributeValueToString(item[header])
 			v.dataTable.SetCell(currentRow, currentCol,
 				tview.NewTableCell(strings.TrimSpace(value)).
-					SetTextColor(tcell.ColorBeige).
+					SetTextColor(style.Active.FieldText).
 					SetAlign(tview.AlignLeft).
 					SetMaxWidth(columnWidths[header]).
 					SetExpansion(1).
@@ -462,7 +462,7 @@ func (v *View) updateDataTableForItems(items []map[string]dynamodbtypes.Attribut
 
 	if v.state.showRowNumbers {
 		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
-			style.GruvboxMaterial.Yellow)
+			style.Active.Title)
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)
@@ -508,7 +508,7 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 		opts = components.PromptOptions{
 			Title:      " Filter Tables ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnDone: func(text string) {
 				v.state.leftPanelFilter = text
 				v.filterLeftPanel(text)
@@ -529,7 +529,7 @@ func (v *View) HandleFilter(prompt *components.Prompt, previousFocus tview.Primi
 		opts = components.PromptOptions{
 			Title:      " Filter Items ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnDone: func(text string) {
 				v.state.dataPanelFilter = text
 				v.filterItems(text)
@@ -644,7 +644,7 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 		v.filterPrompt.Configure(components.PromptOptions{
 			Title:      " Filter Tables ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnDone: func(text string) {
 				v.state.leftPanelFilter = text
 				v.filterLeftPanel(text)
@@ -666,7 +666,7 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 		v.filterPrompt.Configure(components.PromptOptions{
 			Title:      " Filter Items ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnDone: func(text string) {
 				v.state.dataPanelFilter = text
 				v.filterItems(text)
@@ -779,23 +779,23 @@ func (v *View) showItemDetails(item map[string]dynamodbtypes.AttributeValue) {
 		value := attributeValueToString(item[attr])
 
 		attrCell := tview.NewTableCell(attr).
-			SetTextColor(tcell.ColorMediumTurquoise).
+			SetTextColor(style.Active.Border).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(false)
 		table.SetCell(row+1, 0, attrCell)
 
 		valueCell := tview.NewTableCell(value).
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetAlign(tview.AlignLeft).
-			SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan)).
+			SetSelectedStyle(tcell.StyleDefault.Foreground(style.Active.FieldText).Background(style.Active.SelectionBg)).
 			SetSelectable(true)
 		table.SetCell(row+1, 1, valueCell)
 	}
 
 	table.SetBorder(true).
 		SetTitle(" Item Details (ESC to close, 'y' to copy value) ").
-		SetTitleColor(style.GruvboxMaterial.Yellow).
-		SetBorderColor(tcell.ColorMediumTurquoise)
+		SetTitleColor(style.Active.Title).
+		SetBorderColor(style.Active.Border)
 
 	// Calculate modal height based on the number of attributes
 	// Add extra rows for padding and header
@@ -905,7 +905,7 @@ func (v *View) filterItems(filter string) {
 
 	if v.state.showRowNumbers {
 		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
-			style.GruvboxMaterial.Yellow)
+			style.Active.Title)
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)

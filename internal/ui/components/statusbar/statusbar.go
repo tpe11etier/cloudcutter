@@ -1,8 +1,8 @@
 package statusbar
 
 import (
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 type StatusBar struct {
@@ -20,7 +20,7 @@ func NewStatusBar() *StatusBar {
 
 	sb.SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft).
-		SetTextColor(tcell.ColorMediumTurquoise)
+		SetTextColor(style.Active.Border)
 
 	return sb
 }

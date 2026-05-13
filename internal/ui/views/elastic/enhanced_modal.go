@@ -95,9 +95,9 @@ func (m *EnhancedJSONModal) setupUI() {
 	m.textView = tview.NewTextView()
 	m.textView.SetBorder(true)
 	m.textView.SetTitle(" JSON Document - Vim Mode ")
-	m.textView.SetTitleColor(style.GruvboxMaterial.Foreground)
-	m.textView.SetBorderColor(tcell.ColorMediumTurquoise)
-	m.textView.SetTextColor(style.GruvboxMaterial.Foreground)
+	m.textView.SetTitleColor(style.Active.Foreground)
+	m.textView.SetBorderColor(style.Active.Border)
+	m.textView.SetTextColor(style.Active.Foreground)
 	m.textView.SetDynamicColors(true)
 	m.textView.SetRegions(true)
 	m.textView.SetScrollable(true)
@@ -759,32 +759,16 @@ func (m *EnhancedJSONModal) updateDisplay() {
 // buildTextWithCursor creates text with cursor highlighting (normal mode)
 func (m *EnhancedJSONModal) buildTextWithCursor() string {
 	var result strings.Builder
-
 	for i, line := range m.lines {
 		if i == m.cursorY {
-			// Current line - highlight cursor position
-			if m.cursorX < len(line) {
-				// Cursor is on a character
-				result.WriteString(style.ColorizeJSON(line[:m.cursorX]))
-				result.WriteString("[white:blue]") // Cursor highlight - white text on blue background
-				result.WriteString(string(line[m.cursorX]))
-				result.WriteString("[-:-]") // Reset colors
-				result.WriteString(style.ColorizeJSON(line[m.cursorX+1:]))
-			} else {
-				// Cursor is at end of line - show as space
-				result.WriteString(style.ColorizeJSON(line))
-				result.WriteString("[white:blue] [-:-]") // Highlighted space at end
-			}
+			result.WriteString(style.ColorizeJSONLineWithCursor(line, m.cursorX))
 		} else {
-			// Other lines - normal coloring
-			result.WriteString(style.ColorizeJSON(line))
+			result.WriteString(style.ColorizeJSONLine(line))
 		}
-
 		if i < len(m.lines)-1 {
 			result.WriteString("\n")
 		}
 	}
-
 	return result.String()
 }
 
@@ -811,23 +795,23 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 			// Lines outside selection - show with cursor if applicable
 			if i == m.cursorY {
 				if m.cursorX < len(line) {
-					result.WriteString(style.ColorizeJSON(line[:m.cursorX]))
-					result.WriteString("[white:blue]")
+					result.WriteString(style.ColorizeJSONLine(line[:m.cursorX]))
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorFg, style.Active.CursorBg))
 					result.WriteString(string(line[m.cursorX]))
 					result.WriteString("[-:-]")
-					result.WriteString(style.ColorizeJSON(line[m.cursorX+1:]))
+					result.WriteString(style.ColorizeJSONLine(line[m.cursorX+1:]))
 				} else {
-					result.WriteString(style.ColorizeJSON(line))
-					result.WriteString("[white:blue] [-:-]")
+					result.WriteString(style.ColorizeJSONLine(line))
+					result.WriteString(fmt.Sprintf("[%s:%s] [-:-]", style.Active.CursorFg, style.Active.CursorBg))
 				}
 			} else {
-				result.WriteString(style.ColorizeJSON(line))
+				result.WriteString(style.ColorizeJSONLine(line))
 			}
 		} else if i == startY && i == endY {
 			// Single line selection
 			if startX < len(line) && endX <= len(line) {
-				result.WriteString(style.ColorizeJSON(line[:startX]))
-				result.WriteString("[black:yellow]") // Highlight selection
+				result.WriteString(style.ColorizeJSONLine(line[:startX]))
+				result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 
 				// Handle cursor within selection
 				if i == m.cursorY && m.cursorX >= startX && m.cursorX < endX {
@@ -835,9 +819,9 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 					if m.cursorX > startX {
 						result.WriteString(line[startX:m.cursorX])
 					}
-					result.WriteString("[blue:yellow]") // Cursor in selection - blue text on yellow
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorBg, style.Active.VisualSelectionBg))
 					result.WriteString(string(line[m.cursorX]))
-					result.WriteString("[black:yellow]") // Back to selection color
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 					if m.cursorX+1 < endX {
 						result.WriteString(line[m.cursorX+1 : endX])
 					}
@@ -850,34 +834,34 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 				// Handle cursor after selection
 				if i == m.cursorY && m.cursorX >= endX {
 					if m.cursorX < len(line) {
-						result.WriteString(style.ColorizeJSON(line[endX:m.cursorX]))
-						result.WriteString("[white:blue]")
+						result.WriteString(style.ColorizeJSONLine(line[endX:m.cursorX]))
+						result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorFg, style.Active.CursorBg))
 						result.WriteString(string(line[m.cursorX]))
 						result.WriteString("[-:-]")
-						result.WriteString(style.ColorizeJSON(line[m.cursorX+1:]))
+						result.WriteString(style.ColorizeJSONLine(line[m.cursorX+1:]))
 					} else {
-						result.WriteString(style.ColorizeJSON(line[endX:]))
-						result.WriteString("[white:blue] [-:-]")
+						result.WriteString(style.ColorizeJSONLine(line[endX:]))
+						result.WriteString(fmt.Sprintf("[%s:%s] [-:-]", style.Active.CursorFg, style.Active.CursorBg))
 					}
 				} else {
-					result.WriteString(style.ColorizeJSON(line[endX:]))
+					result.WriteString(style.ColorizeJSONLine(line[endX:]))
 				}
 			} else {
-				result.WriteString(style.ColorizeJSON(line))
+				result.WriteString(style.ColorizeJSONLine(line))
 			}
 		} else if i == startY {
 			// First line of multi-line selection
-			result.WriteString(style.ColorizeJSON(line[:startX]))
-			result.WriteString("[black:yellow]")
+			result.WriteString(style.ColorizeJSONLine(line[:startX]))
+			result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 
 			// Handle cursor in first line
 			if i == m.cursorY && m.cursorX >= startX {
 				if m.cursorX > startX {
 					result.WriteString(line[startX:m.cursorX])
 				}
-				result.WriteString("[blue:yellow]")
+				result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorBg, style.Active.VisualSelectionBg))
 				result.WriteString(string(line[m.cursorX]))
-				result.WriteString("[black:yellow]")
+				result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 				if m.cursorX+1 < len(line) {
 					result.WriteString(line[m.cursorX+1:])
 				}
@@ -888,16 +872,16 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 			result.WriteString("[-:-]")
 		} else if i == endY {
 			// Last line of multi-line selection
-			result.WriteString("[black:yellow]")
+			result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 
 			// Handle cursor in last line
 			if i == m.cursorY && m.cursorX < endX {
 				if m.cursorX > 0 {
 					result.WriteString(line[:m.cursorX])
 				}
-				result.WriteString("[blue:yellow]")
+				result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorBg, style.Active.VisualSelectionBg))
 				result.WriteString(string(line[m.cursorX]))
-				result.WriteString("[black:yellow]")
+				result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 				if m.cursorX+1 < endX {
 					result.WriteString(line[m.cursorX+1 : endX])
 				}
@@ -912,21 +896,21 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 			// Handle cursor after selection on last line
 			if i == m.cursorY && m.cursorX >= endX {
 				if m.cursorX < len(line) {
-					result.WriteString(style.ColorizeJSON(line[endX:m.cursorX]))
-					result.WriteString("[white:blue]")
+					result.WriteString(style.ColorizeJSONLine(line[endX:m.cursorX]))
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorFg, style.Active.CursorBg))
 					result.WriteString(string(line[m.cursorX]))
 					result.WriteString("[-:-]")
-					result.WriteString(style.ColorizeJSON(line[m.cursorX+1:]))
+					result.WriteString(style.ColorizeJSONLine(line[m.cursorX+1:]))
 				} else {
-					result.WriteString(style.ColorizeJSON(line[endX:]))
-					result.WriteString("[white:blue] [-:-]")
+					result.WriteString(style.ColorizeJSONLine(line[endX:]))
+					result.WriteString(fmt.Sprintf("[%s:%s] [-:-]", style.Active.CursorFg, style.Active.CursorBg))
 				}
 			} else {
-				result.WriteString(style.ColorizeJSON(line[endX:]))
+				result.WriteString(style.ColorizeJSONLine(line[endX:]))
 			}
 		} else {
 			// Middle lines of selection - fully highlighted
-			result.WriteString("[black:yellow]")
+			result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 
 			// Handle cursor in middle lines
 			if i == m.cursorY {
@@ -934,9 +918,9 @@ func (m *EnhancedJSONModal) buildTextWithSelectionAndCursor() string {
 					if m.cursorX > 0 {
 						result.WriteString(line[:m.cursorX])
 					}
-					result.WriteString("[blue:yellow]")
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.CursorBg, style.Active.VisualSelectionBg))
 					result.WriteString(string(line[m.cursorX]))
-					result.WriteString("[black:yellow]")
+					result.WriteString(fmt.Sprintf("[%s:%s]", style.Active.VisualSelectionFg, style.Active.VisualSelectionBg))
 					if m.cursorX+1 < len(line) {
 						result.WriteString(line[m.cursorX+1:])
 					}

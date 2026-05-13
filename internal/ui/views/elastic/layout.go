@@ -30,21 +30,21 @@ func (v *View) setupLayout() {
 						Style: types.InputFieldStyle{
 							BaseStyle: types.BaseStyle{
 								Border:      true,
-								BorderColor: tcell.ColorBeige,
+								BorderColor: style.Active.FieldText,
 								TitleAlign:  tview.AlignLeft,
 							},
-							LabelColor:           tcell.ColorMediumTurquoise,
-							FieldBackgroundColor: tcell.ColorBlack,
-							FieldTextColor:       tcell.ColorBeige,
+							LabelColor:           style.Active.Border,
+							FieldBackgroundColor: style.Active.FieldBg,
+							FieldTextColor:       style.Active.FieldText,
 						},
 						Properties: types.InputFieldProperties{
 							Label:      " ES Filter >_ ",
 							FieldWidth: 0,
 							OnFocus: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+								inputField.SetBorderColor(style.Active.Border)
 							},
 							OnBlur: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorBeige)
+								inputField.SetBorderColor(style.Active.FieldText)
 							},
 						},
 					},
@@ -56,20 +56,20 @@ func (v *View) setupLayout() {
 						Style: types.TextViewStyle{
 							BaseStyle: types.BaseStyle{
 								Border:      true,
-								BorderColor: tcell.ColorBeige,
+								BorderColor: style.Active.FieldText,
 								Title:       " Active Filters (Delete/Backspace to remove all, or press filter number) ",
-								TitleColor:  style.GruvboxMaterial.Yellow,
-								TextColor:   tcell.ColorBeige,
+								TitleColor:  style.Active.Title,
+								TextColor:   style.Active.FieldText,
 							},
 						},
 						Properties: types.TextViewProperties{
 							Text:          "No active filters",
 							DynamicColors: true,
 							OnFocus: func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorMediumTurquoise)
+								textView.SetBorderColor(style.Active.Border)
 							},
 							OnBlur: func(textView *tview.TextView) {
-								textView.SetBorderColor(tcell.ColorBeige)
+								textView.SetBorderColor(style.Active.FieldText)
 							},
 						},
 					},
@@ -87,28 +87,28 @@ func (v *View) setupLayout() {
 								Style: types.InputFieldStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
-										BorderColor: tcell.ColorBeige,
+										BorderColor: style.Active.FieldText,
 										Title:       " Index ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  style.GruvboxMaterial.Yellow,
+										TitleColor:  style.Active.Title,
 									},
-									LabelColor:           tcell.ColorMediumTurquoise,
-									FieldBackgroundColor: tcell.ColorBlack,
-									FieldTextColor:       tcell.ColorBeige,
+									LabelColor:           style.Active.Border,
+									FieldBackgroundColor: style.Active.FieldBg,
+									FieldTextColor:       style.Active.FieldText,
 								},
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
 									Text:       v.state.search.currentIndex,
 									OnFocus: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+										inputField.SetBorderColor(style.Active.Border)
 										if helpCategory := v.manager.Help().GetContextHelp(); helpCategory != nil {
 											helpCategory.Commands = getIndices(v)
 											v.manager.Help().SetContextHelp(helpCategory)
 										}
 									},
 									OnBlur: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorBeige)
+										inputField.SetBorderColor(style.Active.FieldText)
 									},
 								},
 								Help: getIndices(v),
@@ -121,24 +121,24 @@ func (v *View) setupLayout() {
 								Style: types.InputFieldStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
-										BorderColor: tcell.ColorBeige,
+										BorderColor: style.Active.FieldText,
 										Title:       " Timeframe ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  style.GruvboxMaterial.Yellow,
+										TitleColor:  style.Active.Title,
 									},
-									LabelColor:           tcell.ColorMediumTurquoise,
-									FieldBackgroundColor: tcell.ColorBlack,
-									FieldTextColor:       tcell.ColorBeige,
+									LabelColor:           style.Active.Border,
+									FieldBackgroundColor: style.Active.FieldBg,
+									FieldTextColor:       style.Active.FieldText,
 								},
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
 									Text:       "today",
 									OnFocus: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+										inputField.SetBorderColor(style.Active.Border)
 									},
 									OnBlur: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorBeige)
+										inputField.SetBorderColor(style.Active.FieldText)
 									},
 									DoneFunc: func(s string) {
 										if s == "" {
@@ -172,24 +172,24 @@ func (v *View) setupLayout() {
 								Style: types.InputFieldStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
-										BorderColor: tcell.ColorBeige,
+										BorderColor: style.Active.FieldText,
 										Title:       " # Results ",
 										TitleAlign:  tview.AlignCenter,
-										TitleColor:  style.GruvboxMaterial.Yellow,
+										TitleColor:  style.Active.Title,
 									},
-									LabelColor:           tcell.ColorMediumTurquoise,
-									FieldBackgroundColor: tcell.ColorBlack,
-									FieldTextColor:       tcell.ColorBeige,
+									LabelColor:           style.Active.Border,
+									FieldBackgroundColor: style.Active.FieldBg,
+									FieldTextColor:       style.Active.FieldText,
 								},
 								Properties: types.InputFieldProperties{
 									Label:      ">_ ",
 									FieldWidth: 0,
 									Text:       strconv.Itoa(v.state.search.numResults),
 									OnFocus: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+										inputField.SetBorderColor(style.Active.Border)
 									},
 									OnBlur: func(inputField *tview.InputField) {
-										inputField.SetBorderColor(tcell.ColorBeige)
+										inputField.SetBorderColor(style.Active.FieldText)
 									},
 									DoneFunc: func(s string) {
 										if num, err := strconv.Atoi(s); err == nil && num > 0 {
@@ -212,23 +212,23 @@ func (v *View) setupLayout() {
 						Style: types.InputFieldStyle{
 							BaseStyle: types.BaseStyle{
 								Border:      true,
-								BorderColor: tcell.ColorBeige,
+								BorderColor: style.Active.FieldText,
 								TitleAlign:  tview.AlignLeft,
 								Title:       " Filter Results ",
-								TitleColor:  style.GruvboxMaterial.Yellow,
+								TitleColor:  style.Active.Title,
 							},
-							LabelColor:           tcell.ColorMediumTurquoise,
-							FieldBackgroundColor: tcell.ColorBlack,
-							FieldTextColor:       tcell.ColorBeige,
+							LabelColor:           style.Active.Border,
+							FieldBackgroundColor: style.Active.FieldBg,
+							FieldTextColor:       style.Active.FieldText,
 						},
 						Properties: types.InputFieldProperties{
 							Label:      ">_ ",
 							FieldWidth: 0,
 							OnFocus: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorMediumTurquoise)
+								inputField.SetBorderColor(style.Active.Border)
 							},
 							OnBlur: func(inputField *tview.InputField) {
-								inputField.SetBorderColor(tcell.ColorBeige)
+								inputField.SetBorderColor(style.Active.FieldText)
 							},
 						},
 					},
@@ -255,20 +255,20 @@ func (v *View) setupLayout() {
 								Style: types.ListStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
-										BorderColor: tcell.ColorBeige,
+										BorderColor: style.Active.FieldText,
 										Title:       "Available Fields (Enter to select)",
-										TitleColor:  style.GruvboxMaterial.Yellow,
-										TextColor:   tcell.ColorBeige,
+										TitleColor:  style.Active.Title,
+										TextColor:   style.Active.FieldText,
 									},
-									SelectedTextColor:       tcell.ColorBeige,
-									SelectedBackgroundColor: tcell.ColorDarkCyan,
+									SelectedTextColor:       style.Active.SelectionFg,
+									SelectedBackgroundColor: style.Active.SelectionBg,
 								},
 								Properties: types.ListProperties{
 									OnFocus: func(list *tview.List) {
-										list.SetBorderColor(tcell.ColorMediumTurquoise)
+										list.SetBorderColor(style.Active.Border)
 									},
 									OnBlur: func(list *tview.List) {
-										list.SetBorderColor(tcell.ColorBeige)
+										list.SetBorderColor(style.Active.FieldText)
 									},
 									OnChanged: func(_ int, mainText string, _ string, _ rune) {
 										// Long field names are clipped to the panel
@@ -287,20 +287,20 @@ func (v *View) setupLayout() {
 								Style: types.ListStyle{
 									BaseStyle: types.BaseStyle{
 										Border:      true,
-										BorderColor: tcell.ColorBeige,
+										BorderColor: style.Active.FieldText,
 										Title:       "Selected Fields (shift+j/k to reorder)",
-										TitleColor:  style.GruvboxMaterial.Yellow,
-										TextColor:   tcell.ColorBeige,
+										TitleColor:  style.Active.Title,
+										TextColor:   style.Active.FieldText,
 									},
-									SelectedTextColor:       tcell.ColorBeige,
-									SelectedBackgroundColor: tcell.ColorDarkCyan,
+									SelectedTextColor:       style.Active.SelectionFg,
+									SelectedBackgroundColor: style.Active.SelectionBg,
 								},
 								Properties: types.ListProperties{
 									OnFocus: func(list *tview.List) {
-										list.SetBorderColor(tcell.ColorMediumTurquoise)
+										list.SetBorderColor(style.Active.Border)
 									},
 									OnBlur: func(list *tview.List) {
-										list.SetBorderColor(tcell.ColorBeige)
+										list.SetBorderColor(style.Active.FieldText)
 									},
 									OnChanged: func(_ int, mainText string, _ string, _ rune) {
 										if mainText != "" {
@@ -319,17 +319,17 @@ func (v *View) setupLayout() {
 						Style: types.TableStyle{
 							BaseStyle: types.BaseStyle{
 								Border:      true,
-								BorderColor: tcell.ColorBeige,
+								BorderColor: style.Active.FieldText,
 							},
-							SelectedTextColor:       tcell.ColorBeige,
-							SelectedBackgroundColor: tcell.ColorDarkCyan,
+							SelectedTextColor:       style.Active.SelectionFg,
+							SelectedBackgroundColor: style.Active.SelectionBg,
 						},
 						Properties: types.TableProperties{
 							OnFocus: func(table *tview.Table) {
-								table.SetBorderColor(tcell.ColorMediumTurquoise)
+								table.SetBorderColor(style.Active.Border)
 							},
 							OnBlur: func(table *tview.Table) {
-								table.SetBorderColor(tcell.ColorBeige)
+								table.SetBorderColor(style.Active.FieldText)
 							},
 						},
 					},
@@ -357,9 +357,9 @@ func (v *View) setupLayout() {
 		return true
 	})
 	v.components.indexInput.SetAutocompleteStyles(
-		tcell.ColorBlack,
-		tcell.StyleDefault.Foreground(tcell.ColorBeige),
-		tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan),
+		style.Active.FieldBg,
+		tcell.StyleDefault.Foreground(style.Active.FieldText),
+		tcell.StyleDefault.Foreground(style.Active.FieldText).Background(style.Active.SelectionBg),
 	)
 	v.components.indexInput.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter {
@@ -401,9 +401,9 @@ func (v *View) setupLayout() {
 		return true
 	})
 	v.components.filterInput.SetAutocompleteStyles(
-		tcell.ColorBlack,
-		tcell.StyleDefault.Foreground(tcell.ColorBeige),
-		tcell.StyleDefault.Foreground(tcell.ColorBeige).Background(tcell.ColorDarkCyan),
+		style.Active.FieldBg,
+		tcell.StyleDefault.Foreground(style.Active.FieldText),
+		tcell.StyleDefault.Foreground(style.Active.FieldText).Background(style.Active.SelectionBg),
 	)
 
 }
@@ -413,12 +413,12 @@ func (v *View) updateHeader() {
 
 	var indexInfo string
 	if stats := v.state.search.indexStats; stats != nil {
-		var healthColor = style.GruvboxMaterial.Red
+		var healthColor = style.Active.StatusError
 		switch stats.Health {
 		case "green":
-			healthColor = style.GruvboxMaterial.Green
+			healthColor = style.Active.StatusOK
 		case "yellow":
-			healthColor = style.GruvboxMaterial.Yellow
+			healthColor = style.Active.Title
 		}
 
 		indexInfo = fmt.Sprintf("%s ([%s]%s[-]) | %s docs | %s",
@@ -447,7 +447,7 @@ func (v *View) updateHeader() {
 	summary = append(summary,
 		types.SummaryItem{Key: "Index", Value: indexInfo},
 		types.SummaryItem{Key: "Filters", Value: fmt.Sprintf("%d", len(v.state.data.filters))},
-		types.SummaryItem{Key: "Showing", Value: fmt.Sprintf("[%s::b]%d-%d of %d[-]", style.GruvboxMaterial.Yellow, rangeStart, rangeEnd, total)},
+		types.SummaryItem{Key: "Showing", Value: fmt.Sprintf("[%s::b]%d-%d of %d[-]", style.Active.Title, rangeStart, rangeEnd, total)},
 		types.SummaryItem{Key: "Timeframe", Value: v.components.timeframeInput.GetText()},
 	)
 
@@ -482,7 +482,7 @@ func (v *View) updateStatusBar(rangeStart, rangeEnd int) {
 
 	if v.state.ui.showRowNumbers {
 		statusMsg += fmt.Sprintf(" | [%s]Row numbers: on (press 'r' to toggle)[-]",
-			style.GruvboxMaterial.Yellow)
+			style.Active.Title)
 	}
 
 	v.manager.UpdateStatusBar(statusMsg)
@@ -502,7 +502,7 @@ func (v *View) setupResultsTableHeaders(headers []string) {
 	for col, header := range headers {
 		table.SetCell(0, col,
 			tview.NewTableCell(header).
-				SetTextColor(style.GruvboxMaterial.Yellow).
+				SetTextColor(style.Active.Title).
 				SetAlign(tview.AlignCenter).
 				SetSelectable(false).
 				SetAttributes(tcell.AttrBold))

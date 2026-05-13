@@ -2,8 +2,8 @@ package components
 
 import (
 	"fmt"
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 	"time"
 )
 
@@ -24,10 +24,10 @@ func NewSpinner() *Spinner {
 	}
 
 	s.SetBorder(true).
-		SetBorderColor(tcell.ColorTeal).
+		SetBorderColor(style.Active.Accent).
 		SetTitle(" Loading ").
 		SetTitleAlign(tview.AlignLeft).
-		SetTitleColor(tcell.ColorTeal)
+		SetTitleColor(style.Active.Accent)
 
 	return s
 }

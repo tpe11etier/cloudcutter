@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 type Spinner struct {
@@ -23,7 +24,7 @@ func NewSpinner(message string) *Spinner {
 	spinner := &Spinner{
 		TextView: tview.NewTextView().
 			SetTextAlign(tview.AlignCenter).
-			SetTextColor(tcell.ColorBeige).
+			SetTextColor(style.Active.FieldText).
 			SetDynamicColors(true),
 		frames:  []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"},
 		current: 0,
@@ -83,7 +84,7 @@ func (s *Spinner) animate(app *tview.Application) {
 			return
 		case <-ticker.C:
 			app.QueueUpdateDraw(func() {
-				s.SetText(fmt.Sprintf("\n[yellow]%s[white] %s", s.message, s.frames[s.current]))
+				s.SetText(fmt.Sprintf("\n[%s]%s[%s] %s", style.Active.Title, s.message, style.Active.Foreground, s.frames[s.current]))
 			})
 			s.current = (s.current + 1) % len(s.frames)
 		}
@@ -103,7 +104,7 @@ func (s *Spinner) animateWithContext(ctx context.Context, app *tview.Application
 			return
 		case <-ticker.C:
 			app.QueueUpdateDraw(func() {
-				s.SetText(fmt.Sprintf("\n[yellow]%s[white] %s", s.message, s.frames[s.current]))
+				s.SetText(fmt.Sprintf("\n[%s]%s[%s] %s", style.Active.Title, s.message, style.Active.Foreground, s.frames[s.current]))
 			})
 			s.current = (s.current + 1) % len(s.frames)
 		}

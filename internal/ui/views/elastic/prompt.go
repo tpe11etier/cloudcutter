@@ -1,10 +1,10 @@
 package elastic
 
 import (
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components"
 	"github.com/tpe11etier/cloudcutter/internal/ui/components/types"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 func (v *View) showFilterPrompt(source tview.Primitive) {
@@ -15,7 +15,7 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 		v.components.filterPrompt.Configure(components.PromptOptions{
 			Title:      " Filter Fields ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnChanged: func(text string) {
 				// Also persist on every keystroke so rebuildFieldList (which
 				// fires on background refresh / new results) re-applies the
@@ -42,7 +42,7 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 		v.components.filterPrompt.Configure(components.PromptOptions{
 			Title:      " Filter Results ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnChanged: func(text string) {
 				v.displayFilteredResults(text)
 			},
@@ -61,7 +61,7 @@ func (v *View) showFilterPrompt(source tview.Primitive) {
 		v.components.filterPrompt.Configure(components.PromptOptions{
 			Title:      " Filter Results ",
 			Label:      " >_ ",
-			LabelColor: tcell.ColorMediumTurquoise,
+			LabelColor: style.Active.Border,
 			OnChanged: func(text string) {
 				v.components.localFilterInput.SetText(v.components.filterPrompt.GetText())
 			},

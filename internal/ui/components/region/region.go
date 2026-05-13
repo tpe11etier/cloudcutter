@@ -3,6 +3,7 @@ package region
 import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 type ManagerInterface interface {
@@ -42,7 +43,7 @@ func NewRegionSelector(onSelect func(string), onCancel func(), manager ManagerIn
 	selector.SetBorder(true)
 	selector.SetTitle(" Select Region ")
 	selector.SetTitleAlign(tview.AlignLeft)
-	selector.SetBorderColor(tcell.ColorMediumTurquoise)
+	selector.SetBorderColor(style.Active.Border)
 
 	for _, region := range regions {
 		selector.AddItem(region, "", 0, nil)

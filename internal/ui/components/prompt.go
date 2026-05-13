@@ -3,6 +3,7 @@ package components
 import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/tpe11etier/cloudcutter/internal/ui/style"
 )
 
 type PromptOptions struct {
@@ -26,8 +27,8 @@ func NewPrompt() *Prompt {
 		InputField: tview.NewInputField(),
 	}
 
-	p.InputField.SetFieldBackgroundColor(tcell.ColorBlack)
-	p.InputField.SetFieldTextColor(tcell.ColorBeige)
+	p.InputField.SetFieldBackgroundColor(style.Active.FieldBg)
+	p.InputField.SetFieldTextColor(style.Active.FieldText)
 
 	return p
 }
@@ -38,7 +39,7 @@ func (p *Prompt) Configure(opts PromptOptions) *Prompt {
 	p.SetTitle(opts.Title)
 	p.SetBorder(true)
 	p.SetTitleAlign(tview.AlignLeft)
-	p.SetBorderColor(tcell.ColorMediumTurquoise)
+	p.SetBorderColor(style.Active.Border)
 
 	p.InputField.SetLabel(opts.Label)
 	p.InputField.SetLabelColor(opts.LabelColor)
