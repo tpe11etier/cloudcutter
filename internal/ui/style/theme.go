@@ -84,11 +84,11 @@ var GruvboxLight = &Theme{
 
 	SelectionFg: tcell.NewRGBColor(255, 255, 255), // white
 	SelectionBg: tcell.NewRGBColor(0, 121, 107),   // #00796b teal 700
-	CursorFg:    tcell.NewRGBColor(255, 255, 255), // white
-	CursorBg:    tcell.NewRGBColor(69, 90, 100),   // #455a64 blue-gray 700
+	CursorFg:    tcell.NewRGBColor(33, 33, 33),    // dark text on light bg
+	CursorBg:    tcell.NewRGBColor(224, 242, 241), // #e0f2f1 teal 50 — subtle row highlight
 
-	VisualSelectionFg: tcell.NewRGBColor(0, 77, 64),      // #004d40 teal 900
-	VisualSelectionBg: tcell.NewRGBColor(224, 242, 241),  // #e0f2f1 teal 50 — very subtle
+	VisualSelectionFg: tcell.NewRGBColor(0, 77, 64),     // #004d40 teal 900
+	VisualSelectionBg: tcell.NewRGBColor(178, 223, 219), // #b2dfdb teal 100
 
 	Subtle: tcell.NewRGBColor(158, 158, 158), // #9e9e9e gray 500
 
