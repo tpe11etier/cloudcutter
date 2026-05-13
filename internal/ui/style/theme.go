@@ -75,9 +75,9 @@ var GruvboxLight = &Theme{
 	Background: tcell.NewRGBColor(255, 255, 255), // white
 	Foreground: tcell.NewRGBColor(33, 33, 33),    // #212121
 
-	Border: tcell.NewRGBColor(224, 224, 224), // #e0e0e0 barely-there gray
-	Title:  tcell.NewRGBColor(0, 105, 92),    // #00695c teal 800 — refined, not garish
-	Accent: tcell.NewRGBColor(0, 105, 92),    // #00695c
+	Border: tcell.NewRGBColor(232, 232, 232), // #e8e8e8 barely-there gray
+	Title:  tcell.NewRGBColor(38, 166, 154),  // #26a69a teal 400 — matches mockup accent
+	Accent: tcell.NewRGBColor(38, 166, 154),  // #26a69a
 
 	FieldText: tcell.NewRGBColor(33, 33, 33),    // #212121
 	FieldBg:   tcell.NewRGBColor(250, 250, 250), // #fafafa near-white
