@@ -16,7 +16,7 @@ func NewTestFilterInputHandler(view *View) *MockFilterInputHandler {
 }
 
 func (h *MockFilterInputHandler) HandleEvent(event *tcell.EventKey, view *View) *tcell.EventKey {
-	if shortcut := h.handleCommonShortcuts(event); shortcut == nil {
+	if shortcut := h.view.handleCommonShortcuts(event); shortcut == nil {
 		return nil
 	}
 
@@ -47,21 +47,6 @@ func (h *MockFilterInputHandler) HandleEvent(event *tcell.EventKey, view *View) 
 	return event
 }
 
-func (h *MockFilterInputHandler) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyCtrlA:
-		h.view.manager.SetFocus(h.view.components.fieldList)
-		return nil
-	case tcell.KeyCtrlS:
-		h.view.manager.SetFocus(h.view.components.selectedList)
-		return nil
-	case tcell.KeyCtrlR:
-		h.view.manager.SetFocus(h.view.components.resultsTable)
-		return nil
-	}
-	return event
-}
-
 type MockFieldListHandler struct {
 	view *View
 }
@@ -71,7 +56,7 @@ func NewTestFieldListHandler(view *View) *MockFieldListHandler {
 }
 
 func (h *MockFieldListHandler) HandleEvent(event *tcell.EventKey, view *View) *tcell.EventKey {
-	if shortcut := h.handleCommonShortcuts(event); shortcut == nil {
+	if shortcut := h.view.handleCommonShortcuts(event); shortcut == nil {
 		return nil
 	}
 
@@ -96,21 +81,6 @@ func (h *MockFieldListHandler) HandleEvent(event *tcell.EventKey, view *View) *t
 	return event
 }
 
-func (h *MockFieldListHandler) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyCtrlA:
-		h.view.manager.SetFocus(h.view.components.fieldList)
-		return nil
-	case tcell.KeyCtrlS:
-		h.view.manager.SetFocus(h.view.components.selectedList)
-		return nil
-	case tcell.KeyCtrlR:
-		h.view.manager.SetFocus(h.view.components.resultsTable)
-		return nil
-	}
-	return event
-}
-
 type MockSelectedListHandler struct {
 	view *View
 }
@@ -120,21 +90,21 @@ func NewTestSelectedListHandler(view *View) *MockSelectedListHandler {
 }
 
 func (h *MockSelectedListHandler) HandleEvent(event *tcell.EventKey, view *View) *tcell.EventKey {
-	if shortcut := h.handleCommonShortcuts(event); shortcut == nil {
+	if shortcut := h.view.handleCommonShortcuts(event); shortcut == nil {
 		return nil
 	}
 
 	switch event.Key() {
 	case tcell.KeyRune:
 		switch event.Rune() {
-		case 'k': // Move up
+		case 'k':
 			index := h.view.components.selectedList.GetCurrentItem()
 			if index >= 0 && index < h.view.components.selectedList.GetItemCount() {
 				mainText, _ := h.view.components.selectedList.GetItemText(index)
 				h.view.moveFieldPosition(mainText, true)
 			}
 			return nil
-		case 'j': // Move down
+		case 'j':
 			index := h.view.components.selectedList.GetCurrentItem()
 			if index >= 0 && index < h.view.components.selectedList.GetItemCount() {
 				mainText, _ := h.view.components.selectedList.GetItemText(index)
@@ -155,21 +125,6 @@ func (h *MockSelectedListHandler) HandleEvent(event *tcell.EventKey, view *View)
 	return event
 }
 
-func (h *MockSelectedListHandler) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyCtrlA:
-		h.view.manager.SetFocus(h.view.components.fieldList)
-		return nil
-	case tcell.KeyCtrlS:
-		h.view.manager.SetFocus(h.view.components.selectedList)
-		return nil
-	case tcell.KeyCtrlR:
-		h.view.manager.SetFocus(h.view.components.resultsTable)
-		return nil
-	}
-	return event
-}
-
 type MockTimeframeInputHandler struct {
 	view *View
 }
@@ -179,7 +134,7 @@ func NewTestTimeframeInputHandler(view *View) *MockTimeframeInputHandler {
 }
 
 func (h *MockTimeframeInputHandler) HandleEvent(event *tcell.EventKey, view *View) *tcell.EventKey {
-	if shortcut := h.handleCommonShortcuts(event); shortcut == nil {
+	if shortcut := h.view.handleCommonShortcuts(event); shortcut == nil {
 		return nil
 	}
 
@@ -195,21 +150,6 @@ func (h *MockTimeframeInputHandler) HandleEvent(event *tcell.EventKey, view *Vie
 		}
 		h.view.state.search.timeframe = h.view.components.timeframeInput.GetText()
 		// Skip refreshWithCurrentTimeframe() in tests to avoid async operations
-		return nil
-	}
-	return event
-}
-
-func (h *MockTimeframeInputHandler) handleCommonShortcuts(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyCtrlA:
-		h.view.manager.SetFocus(h.view.components.fieldList)
-		return nil
-	case tcell.KeyCtrlS:
-		h.view.manager.SetFocus(h.view.components.selectedList)
-		return nil
-	case tcell.KeyCtrlR:
-		h.view.manager.SetFocus(h.view.components.resultsTable)
 		return nil
 	}
 	return event
