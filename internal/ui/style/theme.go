@@ -73,32 +73,32 @@ var GruvboxDark = &Theme{
 
 var GruvboxLight = &Theme{
 	Background: tcell.NewRGBColor(255, 255, 255), // white
-	Foreground: tcell.NewRGBColor(33, 33, 33),    // #212121 near-black
+	Foreground: tcell.NewRGBColor(33, 33, 33),    // #212121
 
-	Border: tcell.NewRGBColor(189, 189, 189), // #bdbdbd neutral light gray
-	Title:  tcell.NewRGBColor(0, 137, 123),   // #00897b material teal 600
-	Accent: tcell.NewRGBColor(0, 137, 123),   // #00897b
+	Border: tcell.NewRGBColor(224, 224, 224), // #e0e0e0 barely-there gray
+	Title:  tcell.NewRGBColor(0, 105, 92),    // #00695c teal 800 — refined, not garish
+	Accent: tcell.NewRGBColor(0, 105, 92),    // #00695c
 
-	FieldText: tcell.NewRGBColor(33, 33, 33),    // #212121 near-black
-	FieldBg:   tcell.NewRGBColor(245, 245, 245), // #f5f5f5 neutral light gray
+	FieldText: tcell.NewRGBColor(33, 33, 33),    // #212121
+	FieldBg:   tcell.NewRGBColor(250, 250, 250), // #fafafa near-white
 
 	SelectionFg: tcell.NewRGBColor(255, 255, 255), // white
-	SelectionBg: tcell.NewRGBColor(0, 121, 107),   // #00796b material teal 700
+	SelectionBg: tcell.NewRGBColor(0, 121, 107),   // #00796b teal 700
 	CursorFg:    tcell.NewRGBColor(255, 255, 255), // white
-	CursorBg:    tcell.NewRGBColor(66, 66, 66),    // #424242 dark gray
+	CursorBg:    tcell.NewRGBColor(69, 90, 100),   // #455a64 blue-gray 700
 
-	VisualSelectionFg: tcell.NewRGBColor(33, 33, 33),     // dark text
-	VisualSelectionBg: tcell.NewRGBColor(178, 223, 219),  // #b2dfdb teal 100
+	VisualSelectionFg: tcell.NewRGBColor(0, 77, 64),      // #004d40 teal 900
+	VisualSelectionBg: tcell.NewRGBColor(224, 242, 241),  // #e0f2f1 teal 50 — very subtle
 
-	Subtle: tcell.NewRGBColor(117, 117, 117), // #757575 material gray 600
+	Subtle: tcell.NewRGBColor(158, 158, 158), // #9e9e9e gray 500
 
-	StatusOK:    tcell.NewRGBColor(56, 142, 60),  // #388e3c material green 700
-	StatusError: tcell.NewRGBColor(198, 40, 40),  // #c62828 material red 800
+	StatusOK:    tcell.NewRGBColor(46, 125, 50),  // #2e7d32 green 800
+	StatusError: tcell.NewRGBColor(183, 28, 28),  // #b71c1c red 900
 
-	JSONKey:     tcell.NewRGBColor(2, 119, 189),  // #0277bd material blue 800
-	JSONString:  tcell.NewRGBColor(56, 142, 60),  // #388e3c material green 700
-	JSONNumber:  tcell.NewRGBColor(230, 81, 0),   // #e65100 material orange 900
-	JSONBool:    tcell.NewRGBColor(106, 27, 154), // #6a1b9a material purple 800
-	JSONNull:    tcell.NewRGBColor(198, 40, 40),  // #c62828 material red 800
-	JSONBracket: tcell.NewRGBColor(158, 158, 158), // #9e9e9e material gray 500
+	JSONKey:     tcell.NewRGBColor(21, 101, 192), // #1565c0 blue 800
+	JSONString:  tcell.NewRGBColor(46, 125, 50),  // #2e7d32 green 800
+	JSONNumber:  tcell.NewRGBColor(191, 54, 12),  // #bf360c deep-orange 900
+	JSONBool:    tcell.NewRGBColor(106, 27, 154), // #6a1b9a purple 900
+	JSONNull:    tcell.NewRGBColor(183, 28, 28),  // #b71c1c red 900
+	JSONBracket: tcell.NewRGBColor(189, 189, 189), // #bdbdbd gray 400 — very subtle
 }
