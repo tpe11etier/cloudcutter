@@ -72,33 +72,33 @@ var GruvboxDark = &Theme{
 }
 
 var GruvboxLight = &Theme{
-	Background: tcell.NewRGBColor(251, 241, 199), // #fbf1c7
-	Foreground: tcell.NewRGBColor(60, 56, 54),    // #3c3836
+	Background: tcell.NewRGBColor(255, 255, 255), // white
+	Foreground: tcell.NewRGBColor(29, 32, 33),    // #1d2021 gruvbox dark0_hard
 
-	Border: tcell.NewRGBColor(69, 133, 136),  // #458588 neutral blue
-	Title:  tcell.NewRGBColor(181, 118, 20),  // #b57614 faded yellow/gold
+	Border: tcell.NewRGBColor(168, 153, 132), // #a89984 gruvbox fg4 — subtle warm gray
+	Title:  tcell.NewRGBColor(7, 102, 120),   // #076678 faded blue — dark, readable on white
 	Accent: tcell.NewRGBColor(66, 123, 88),   // #427b58 faded aqua
 
-	FieldText: tcell.NewRGBColor(60, 56, 54),    // #3c3836 dark fg
-	FieldBg:   tcell.NewRGBColor(235, 219, 178), // #ebdbb2 bg1
+	FieldText: tcell.NewRGBColor(29, 32, 33),     // #1d2021 near-black
+	FieldBg:   tcell.NewRGBColor(242, 238, 230),  // very light warm gray
 
-	SelectionFg: tcell.NewRGBColor(251, 241, 199), // #fbf1c7 light on dark
-	SelectionBg: tcell.NewRGBColor(69, 133, 136),  // #458588 blue
-	CursorFg:    tcell.NewRGBColor(251, 241, 199), // #fbf1c7
-	CursorBg:    tcell.NewRGBColor(60, 56, 54),    // #3c3836
+	SelectionFg: tcell.NewRGBColor(251, 241, 199), // #fbf1c7 cream on dark
+	SelectionBg: tcell.NewRGBColor(7, 102, 120),   // #076678 dark teal
+	CursorFg:    tcell.NewRGBColor(255, 255, 255), // white
+	CursorBg:    tcell.NewRGBColor(29, 32, 33),    // near-black
 
-	VisualSelectionFg: tcell.NewRGBColor(60, 56, 54),    // #3c3836
-	VisualSelectionBg: tcell.NewRGBColor(213, 196, 161), // #d5c4a1 bg2
+	VisualSelectionFg: tcell.NewRGBColor(29, 32, 33),    // dark text
+	VisualSelectionBg: tcell.NewRGBColor(213, 196, 161), // #d5c4a1 gruvbox bg2
 
-	Subtle: tcell.NewRGBColor(146, 131, 116), // #928374
+	Subtle: tcell.NewRGBColor(146, 131, 116), // #928374 gruvbox gray
 
-	StatusOK:    tcell.NewRGBColor(121, 116, 14), // #79740e faded green
-	StatusError: tcell.NewRGBColor(157, 0, 6),    // #9d0006 faded red
+	StatusOK:    tcell.NewRGBColor(66, 123, 88), // #427b58 faded green
+	StatusError: tcell.NewRGBColor(157, 0, 6),   // #9d0006 faded red
 
-	JSONKey:     tcell.NewRGBColor(7, 102, 120),   // #076678 faded blue
-	JSONString:  tcell.NewRGBColor(121, 116, 14),  // #79740e faded green
-	JSONNumber:  tcell.NewRGBColor(175, 58, 3),    // #af3a03 faded orange
-	JSONBool:    tcell.NewRGBColor(143, 63, 113),  // #8f3f71 faded purple
-	JSONNull:    tcell.NewRGBColor(157, 0, 6),     // #9d0006 faded red
-	JSONBracket: tcell.NewRGBColor(181, 118, 20),  // #b57614 faded yellow
+	JSONKey:     tcell.NewRGBColor(7, 102, 120),   // #076678 dark blue
+	JSONString:  tcell.NewRGBColor(66, 123, 88),   // #427b58 dark green
+	JSONNumber:  tcell.NewRGBColor(175, 58, 3),    // #af3a03 dark orange
+	JSONBool:    tcell.NewRGBColor(143, 63, 113),  // #8f3f71 dark purple
+	JSONNull:    tcell.NewRGBColor(157, 0, 6),     // #9d0006 dark red
+	JSONBracket: tcell.NewRGBColor(146, 131, 116), // #928374 gray — subtle brackets
 }
