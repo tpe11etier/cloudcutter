@@ -570,16 +570,12 @@ func (vm *Manager) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	if event.Key() == tcell.KeyCtrlL {
-		if style.GruvboxLight != nil {
-			next := style.GruvboxLight
-			if style.Active == style.GruvboxLight {
-				next = style.GruvboxDark
-			}
-			vm.SwitchTheme(next)
-			vm.UpdateStatusBar("Theme toggled")
-		} else {
-			vm.UpdateStatusBar("No light theme defined")
+		next := style.CloudCutterModern
+		if style.Active == style.CloudCutterModern {
+			next = style.CloudCutterDark
 		}
+		vm.SwitchTheme(next)
+		vm.UpdateStatusBar("Theme toggled")
 		return nil
 	}
 
