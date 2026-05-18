@@ -414,6 +414,31 @@ func TestParseFilter(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:   "Not-empty with double-quotes",
+			filter: `content.reason!=""`,
+			want: map[string]any{
+				"exists": map[string]any{"field": "content.reason"},
+			},
+		},
+		{
+			name:   "Not-empty with no value",
+			filter: "content.reason!=",
+			want: map[string]any{
+				"exists": map[string]any{"field": "content.reason"},
+			},
+		},
+		{
+			name:   "Not-equal keyword value",
+			filter: "status!=open",
+			want: map[string]any{
+				"bool": map[string]any{
+					"must_not": map[string]any{
+						"match": map[string]any{"status": "open"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

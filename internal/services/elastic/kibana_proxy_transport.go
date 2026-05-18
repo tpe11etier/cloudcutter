@@ -3,6 +3,7 @@ package elastic
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,8 +50,12 @@ type kibanaProxyTransport struct {
 // token, and an optional tokenRefresh callback (pass nil to disable the
 // 401-retry).
 func newKibanaProxyTransport(spec config.TransportSpec, token string, tokenRefresh func() (string, error)) *kibanaProxyTransport {
+	client := &http.Client{Timeout: 30 * time.Second}
+	if spec.TLSSkipVerify {
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec
+	}
 	return &kibanaProxyTransport{
-		client:       &http.Client{Timeout: 30 * time.Second},
+		client:       client,
 		baseURL:      strings.TrimRight(spec.BaseURL, "/"),
 		proxyPath:    spec.ProxyPath,
 		tokenHeader:  spec.TokenHeader,

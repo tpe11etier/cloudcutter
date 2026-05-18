@@ -144,6 +144,29 @@ func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) 
 		}, nil
 	}
 
+	// Handle != (not-equal / not-empty) before = split
+	if idx := strings.Index(filter, "!="); idx > 0 {
+		fieldName := strings.TrimSpace(filter[:idx])
+		value := strings.TrimSpace(filter[idx+2:])
+		if !isValidFieldName(fieldName) {
+			return nil, &ParseError{Field: fieldName, Message: "invalid field name"}
+		}
+		// field!="" → exists query
+		if value == `""` || value == "" {
+			return map[string]any{
+				"exists": map[string]any{"field": fieldName},
+			}, nil
+		}
+		// field!=value → must_not the equivalent positive clause
+		positive, err := ParseFilter(fieldName+"="+value, fieldCache)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"bool": map[string]any{"must_not": positive},
+		}, nil
+	}
+
 	// Handle range queries first
 	if clause, err := parseRangeSyntax(filter, fieldCache); err != nil {
 		return nil, err
@@ -234,13 +257,13 @@ func ParseFilter(filter string, fieldCache *FieldCache) (map[string]any, error) 
 			if trailingStarOnly {
 				return map[string]any{
 					"prefix": map[string]any{
-						fieldName: strings.ToLower(strings.TrimSuffix(unescapeValue(value), "*")),
+						fieldName: strings.TrimSuffix(unescapeValue(value), "*"),
 					},
 				}, nil
 			}
 			return map[string]any{
 				"wildcard": map[string]any{
-					fieldName: strings.ToLower(unescapeValue(value)),
+					fieldName: unescapeValue(value),
 				},
 			}, nil
 		}

@@ -144,6 +144,7 @@ func (v *View) loadFields() error {
 			v.state.data.fieldCache.Set(f, &meta)
 		}
 
+		capsFields := make([]string, 0, len(fieldCaps.Fields))
 		for f, types := range fieldCaps.Fields {
 			for typeName, meta := range types {
 				v.state.data.fieldCache.Set(f, &FieldMetadata{
@@ -154,7 +155,9 @@ func (v *View) loadFields() error {
 				})
 				break
 			}
+			capsFields = append(capsFields, f)
 		}
+		v.state.data.fieldState.AddDiscoveredFields(capsFields)
 	}
 
 	if !v.state.data.fieldState.IsFieldSelected("_id") {
@@ -377,6 +380,17 @@ func (fs *FieldState) Reset() {
 	fs.discoveredFields = make(map[string]struct{})
 	fs.selectedFields = make(map[string]struct{})
 	fs.fieldOrder = make([]string, 0)
+}
+
+// AddDiscoveredFields merges a list of field names into the discovered set.
+// Used to seed from FieldCaps so all mapped fields are searchable, not just
+// those that appeared in the first document sample.
+func (fs *FieldState) AddDiscoveredFields(fields []string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	for _, f := range fields {
+		fs.discoveredFields[f] = struct{}{}
+	}
 }
 
 // UpdateFromDocuments merges fields from document results into the discovered

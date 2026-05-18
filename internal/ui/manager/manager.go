@@ -1017,7 +1017,7 @@ func (vm *Manager) ShowJWTLoginModal(env environments.Environment, onSuccess fun
 
 		vm.statusBar.SetText(fmt.Sprintf("Authenticating with %s...", env.Name))
 		go func() {
-			token, err := auth.LoginJWT(vm.ctx, loginSpec, values)
+			token, err := auth.LoginJWT(vm.ctx, loginSpec, env.Transport, values)
 			vm.app.QueueUpdateDraw(func() {
 				if err != nil {
 					vm.statusBar.SetText(fmt.Sprintf("Login failed: %v", err))

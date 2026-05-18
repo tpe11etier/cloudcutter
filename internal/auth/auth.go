@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -244,7 +245,11 @@ func runJWTProbe(ctx context.Context, env environments.Environment, token string
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	if err := probe.Run(probeCtx, &http.Client{Timeout: 15 * time.Second}, req, env.Transport.Probe.RejectHTML); err != nil {
+	probeClient := &http.Client{Timeout: 15 * time.Second}
+	if env.Transport.TLSSkipVerify {
+		probeClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec
+	}
+	if err := probe.Run(probeCtx, probeClient, req, env.Transport.Probe.RejectHTML); err != nil {
 		return err
 	}
 	return nil

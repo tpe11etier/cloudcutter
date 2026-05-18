@@ -81,14 +81,15 @@ type TokenExtractSpec struct {
 
 // TransportSpec describes how each ES request is wrapped.
 type TransportSpec struct {
-	Type        string            `yaml:"type"` // "plain" | "sigv4" | "kibana_proxy"
-	BaseURL     string            `yaml:"base_url,omitempty"`
-	URLTemplate string            `yaml:"url_template,omitempty"` // for sigv4
-	Service     string            `yaml:"service,omitempty"`      // for sigv4
-	ProxyPath   string            `yaml:"proxy_path,omitempty"`   // for kibana_proxy
-	TokenHeader *TokenHeaderSpec  `yaml:"token_header,omitempty"`
-	Headers     map[string]string `yaml:"headers,omitempty"`
-	Probe       *ProbeSpec        `yaml:"probe,omitempty"`
+	Type          string            `yaml:"type"` // "plain" | "sigv4" | "kibana_proxy"
+	BaseURL       string            `yaml:"base_url,omitempty"`
+	URLTemplate   string            `yaml:"url_template,omitempty"` // for sigv4
+	Service       string            `yaml:"service,omitempty"`      // for sigv4
+	ProxyPath     string            `yaml:"proxy_path,omitempty"`   // for kibana_proxy
+	TLSSkipVerify bool              `yaml:"tls_skip_verify,omitempty"`
+	TokenHeader   *TokenHeaderSpec  `yaml:"token_header,omitempty"`
+	Headers       map[string]string `yaml:"headers,omitempty"`
+	Probe         *ProbeSpec        `yaml:"probe,omitempty"`
 }
 
 // TokenHeaderSpec describes how to attach the JWT on every outgoing request.

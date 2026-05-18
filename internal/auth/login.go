@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ import (
 //
 // The function is vendor-neutral: each backend declares its own URL,
 // body format, query, and token-extraction strategy in YAML.
-func LoginJWT(ctx context.Context, spec config.LoginSpec, formValues map[string]string) (string, error) {
+func LoginJWT(ctx context.Context, spec config.LoginSpec, transport config.TransportSpec, formValues map[string]string) (string, error) {
 	if spec.URL == "" {
 		return "", fmt.Errorf("login: spec.URL is empty")
 	}
@@ -55,6 +56,9 @@ func LoginJWT(ctx context.Context, spec config.LoginSpec, formValues map[string]
 	req.Header.Set("User-Agent", "cloudcutter")
 
 	client := &http.Client{Timeout: 15 * time.Second}
+	if transport.TLSSkipVerify {
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("login request: %w", err)

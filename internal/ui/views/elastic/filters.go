@@ -98,10 +98,10 @@ func (v *View) entryMatchesFilter(entry *DocEntry, filterText string) bool {
 }
 
 // filterInputOperatorIndex returns the index of the first operator character
-// (=, >, <, ~) in text, or -1 if none is present.
+// (=, >, <, ~, !) in text, or -1 if none is present.
 func filterInputOperatorIndex(text string) int {
 	for i, ch := range text {
-		if ch == '=' || ch == '>' || ch == '<' || ch == '~' {
+		if ch == '=' || ch == '>' || ch == '<' || ch == '~' || ch == '!' {
 			return i
 		}
 	}
