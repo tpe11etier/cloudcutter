@@ -51,7 +51,7 @@ func TestLoginJWTPostsJSONAndExtractsCookie(t *testing.T) {
 		"password": "s3cret",
 	}
 
-	tok, err := LoginJWT(context.Background(), spec, values)
+	tok, err := LoginJWT(context.Background(), spec, config.TransportSpec{},values)
 	if err != nil {
 		t.Fatalf("LoginJWT: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestLoginJWTFormBodyFormat(t *testing.T) {
 	}
 	values := map[string]string{"u": "bob", "p": "pw"}
 
-	tok, err := LoginJWT(context.Background(), spec, values)
+	tok, err := LoginJWT(context.Background(), spec, config.TransportSpec{},values)
 	if err != nil {
 		t.Fatalf("LoginJWT: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestLoginJWTRejects401As4InvalidCredentials(t *testing.T) {
 		BodyFields:   []config.FormField{{Name: "u", Kind: "text"}},
 		TokenExtract: config.TokenExtractSpec{From: "cookie", Name: "x"},
 	}
-	_, err := LoginJWT(context.Background(), spec, map[string]string{"u": "x"})
+	_, err := LoginJWT(context.Background(), spec, config.TransportSpec{},map[string]string{"u": "x"})
 	if err == nil {
 		t.Fatal("expected error on 401")
 	}
@@ -147,7 +147,7 @@ func TestLoginJWTRejectsJSONPathNotImplemented(t *testing.T) {
 		BodyFields:   []config.FormField{{Name: "u", Kind: "text"}},
 		TokenExtract: config.TokenExtractSpec{From: "json_path", Name: "$.token"},
 	}
-	_, err := LoginJWT(context.Background(), spec, map[string]string{"u": "x"})
+	_, err := LoginJWT(context.Background(), spec, config.TransportSpec{},map[string]string{"u": "x"})
 	if err == nil {
 		t.Fatal("expected error for json_path")
 	}
@@ -168,7 +168,7 @@ func TestLoginJWTMissingCookieErrors(t *testing.T) {
 		BodyFields:   []config.FormField{{Name: "u", Kind: "text"}},
 		TokenExtract: config.TokenExtractSpec{From: "cookie", Name: "auth-tok"},
 	}
-	_, err := LoginJWT(context.Background(), spec, map[string]string{"u": "x"})
+	_, err := LoginJWT(context.Background(), spec, config.TransportSpec{},map[string]string{"u": "x"})
 	if err == nil {
 		t.Fatal("expected error when cookie is absent")
 	}
